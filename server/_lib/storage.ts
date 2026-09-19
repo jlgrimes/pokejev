@@ -18,27 +18,34 @@ export interface Storage {
   kind: 'blob' | 'local';
 }
 
-const LOCAL_ROOT = process.env.LOCAL_STORAGE_DIR ?? '.data';
+/**
+ * Resolved per call rather than at import time.
+ *
+ * The long-lived server points this at its data directory, and an import-time
+ * constant would capture the default before that happens — writing beside the
+ * image instead of the mounted volume, so nothing would survive a redeploy.
+ */
+const localRoot = () => process.env.LOCAL_STORAGE_DIR ?? '.data';
 
 const localStorage: Storage = {
   kind: 'local',
   async read(key) {
     try {
-      return await readFile(join(LOCAL_ROOT, key));
+      return await readFile(join(localRoot(), key));
     } catch {
       return null;
     }
   },
   async write(key, data) {
-    const path = join(LOCAL_ROOT, key);
+    const path = join(localRoot(), key);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, data);
   },
   async remove(key) {
-    await unlink(join(LOCAL_ROOT, key)).catch(() => {});
+    await unlink(join(localRoot(), key)).catch(() => {});
   },
   async stat(key) {
-    return await stat(join(LOCAL_ROOT, key))
+    return await stat(join(localRoot(), key))
       .then((info) => info.size)
       .catch(() => null);
   },

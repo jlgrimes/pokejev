@@ -3,6 +3,7 @@ services:
   - type: web
     name: pokejev
     runtime: docker
+    branch: claude/jev-pokemon-red-gameplay-7joq6g
     plan: starter # the free plan sleeps when idle, which stops Jev playing
     healthCheckPath: /healthz
     envVars:
@@ -12,9 +13,12 @@ services:
         value: jev
       - key: JEV_VISION
         value: 'true'
-      # Paste these in the Render dashboard rather than committing them.
+      # Required: nothing outside Vercel can use the OIDC token, so the
+      # container needs a real gateway key. Paste it in the dashboard.
       - key: AI_GATEWAY_API_KEY
         sync: false
+      # Optional: only for sharing progress with the Vercel deployment. The
+      # mounted disk below already survives restarts on its own.
       - key: BLOB_READ_WRITE_TOKEN
         sync: false
       - key: JEV_ACCESS_TOKEN

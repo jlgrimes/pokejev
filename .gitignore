@@ -7,3 +7,4 @@ roms/*.gb
 roms/*.gbc
 saves/*.sav
 saves/*.state.json
+.data/

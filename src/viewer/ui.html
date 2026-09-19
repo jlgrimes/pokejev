@@ -86,6 +86,18 @@
   #log .error { color: var(--danger); }
   #log .warn { color: var(--warn); }
   .empty { color: var(--dim); font-style: italic; }
+  #rom-panel { border-color: var(--warn); }
+  .drop {
+    border: 1px dashed var(--line); border-radius: 8px; padding: 22px 16px;
+    text-align: center; color: var(--dim); cursor: pointer; transition: all .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--accent); background: #1b2018; }
+  .drop b { display: block; color: var(--ink); margin-bottom: 4px; font-size: 13px; }
+  .drop.busy { opacity: .6; pointer-events: none; }
+  #rom-status { margin-top: 10px; font-size: 12px; }
+  #rom-status.ok { color: var(--good); }
+  #rom-status.err { color: var(--danger); }
+  .hint { color: var(--dim); font-size: 11px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -98,6 +110,17 @@
 
 <main>
   <div>
+    <div class="panel" id="rom-panel" hidden>
+      <h2>Install a ROM</h2>
+      <div class="drop" id="drop">
+        <b>Tap to choose your ROM</b>
+        a .gb file, or the .zip it came in
+      </div>
+      <input type="file" id="rom-file" accept=".gb,.gbc,.zip,application/zip,application/octet-stream" hidden />
+      <div id="rom-status"></div>
+      <div class="hint">Stored on this server. Jev starts playing as soon as it lands.</div>
+    </div>
+
     <div class="panel">
       <h2>Game Boy</h2>
       <img id="screen" alt="Game Boy screen" />
@@ -271,6 +294,48 @@ source.addEventListener('log', (e) => {
   $('log').prepend(div);
   while ($('log').children.length > 60) $('log').lastChild.remove();
 });
+
+/* ---- installing a ROM ---------------------------------------------------- */
+const drop = $('drop');
+const romFile = $('rom-file');
+
+function romStatus(message, kind = '') {
+  $('rom-status').textContent = message;
+  $('rom-status').className = kind;
+}
+
+async function uploadRom(file) {
+  if (!file) return;
+  drop.classList.add('busy');
+  romStatus(`Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)…`);
+  try {
+    const response = await fetch('/rom', { method: 'POST', body: file });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    romStatus(`Installed ${data.title} from ${data.source}. Jev is starting…`, 'ok');
+    setTimeout(() => { $('rom-panel').hidden = true; }, 2500);
+  } catch (error) {
+    romStatus(error.message, 'err');
+  } finally {
+    drop.classList.remove('busy');
+  }
+}
+
+drop.onclick = () => romFile.click();
+romFile.onchange = () => uploadRom(romFile.files[0]);
+for (const event of ['dragenter', 'dragover']) {
+  drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.add('over'); });
+}
+for (const event of ['dragleave', 'drop']) {
+  drop.addEventListener(event, (e) => { e.preventDefault(); drop.classList.remove('over'); });
+}
+drop.addEventListener('drop', (e) => uploadRom(e.dataTransfer?.files?.[0]));
+
+// Ask on load whether this server already has a cartridge in it.
+fetch('/rom')
+  .then((response) => (response.ok ? response.json() : null))
+  .then((status) => { if (status && !status.present) $('rom-panel').hidden = false; })
+  .catch(() => {});
 
 const send = (body) => fetch('/control', {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),

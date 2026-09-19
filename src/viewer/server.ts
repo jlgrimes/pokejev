@@ -22,6 +22,12 @@ export interface ViewerHandle {
   close(): Promise<void>;
 }
 
+export interface RomInstaller {
+  status(): Promise<{ present: boolean; size: number | null }>;
+  /** Accepts a .gb or the .zip it came in; returns what was installed. */
+  install(data: Buffer): Promise<{ title: string; size: number; source: string }>;
+}
+
 export interface ViewerOptions {
   /**
    * Shared secret required to view or control the run.
@@ -31,6 +37,14 @@ export interface ViewerOptions {
    * press buttons. The container entrypoint therefore always supplies one.
    */
   token?: string | undefined;
+  /**
+   * Lets the page install a ROM into a server that started without one.
+   *
+   * Without this the server could only get a ROM from object storage, which
+   * would make a storage token mandatory just to hand it a file. With it, the
+   * only thing a fresh deployment needs is the gateway key.
+   */
+  rom?: RomInstaller | undefined;
 }
 
 const COOKIE_NAME = 'jev_key';
@@ -89,6 +103,7 @@ export function startViewer(
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
+    const rom = options.rom;
 
     // Liveness probe for the host; deliberately unauthenticated and empty.
     if (url.pathname === '/healthz') {
@@ -135,6 +150,33 @@ export function startViewer(
       clients.add(res);
       req.on('close', () => clients.delete(res));
       return;
+    }
+
+    if (url.pathname === '/rom' && rom) {
+      if (req.method === 'GET') {
+        void rom.status().then((status) => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(status));
+        });
+        return;
+      }
+      if (req.method === 'POST') {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        req.on('end', () => {
+          void rom
+            .install(Buffer.concat(chunks))
+            .then((installed) => {
+              res.writeHead(200, { 'content-type': 'application/json' });
+              res.end(JSON.stringify({ ok: true, ...installed }));
+            })
+            .catch((error: Error) => {
+              res.writeHead(400, { 'content-type': 'application/json' });
+              res.end(JSON.stringify({ error: error.message }));
+            });
+        });
+        return;
+      }
     }
 
     if (url.pathname === '/control' && req.method === 'POST') {

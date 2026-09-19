@@ -218,20 +218,28 @@ docker run -p 8080:8080 -v jev-data:/data \
 
 ### Deploying from a phone
 
-`render.yaml` is a Blueprint, so no terminal is needed: **render.com → New →
-Blueprint → connect the repo → pick this branch.** It reads the file and
-prompts for the two secrets. Railway and Fly work the same way from their web
-UIs; only the config file differs.
+`render.yaml` is a Blueprint, so no terminal is needed:
 
-Two environment variables matter, and both differ from the Vercel deployment:
+**[render.com/deploy?repo=https://github.com/jlgrimes/pokejev](https://render.com/deploy?repo=https://github.com/jlgrimes/pokejev&branch=claude/jev-pokemon-red-gameplay-7joq6g)**
 
-- **`AI_GATEWAY_API_KEY`** — required. The Vercel deployment authenticates to
-  the gateway with its own OIDC token; nothing outside Vercel can do that, so
-  the container needs a real key.
-- **`BLOB_READ_WRITE_TOKEN`** — how it finds the ROM you already uploaded, and
-  where it persists progress. Create one on the Blob store in the Vercel
-  dashboard. Without it the server falls back to `DATA_DIR` on disk, which needs
-  a mounted volume to survive a redeploy — and it has no way to get the ROM.
+That reads the blueprint, provisions the disk and prompts for one secret.
+Railway and Fly work the same way from their web UIs; only the config file
+differs.
+
+**Exactly one environment variable is required:**
+
+- **`AI_GATEWAY_API_KEY`** — the Vercel deployment authenticates to the gateway
+  with its own OIDC token, and nothing outside Vercel can do that, so the
+  container needs a real key. Create one under AI Gateway in the Vercel
+  dashboard.
+
+`BLOB_READ_WRITE_TOKEN` is optional and only shares progress with the Vercel
+deployment. The mounted disk survives restarts on its own.
+
+**The ROM is not a deployment concern.** A server with no cartridge starts
+anyway and serves a page asking for one — upload the `.gb`, or the `.zip` it
+came in, and Jev starts playing. It is kept on the disk, so a restart does not
+ask again.
 
 Pick a plan that does not sleep when idle. A free tier that suspends on
 inactivity will stop Jev playing, which defeats the point.
