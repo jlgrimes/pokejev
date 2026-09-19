@@ -228,8 +228,21 @@ export function startViewer(
       }
       if (req.method === 'POST') {
         const chunks: Buffer[] = [];
-        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        let received = 0;
+        let aborted = false;
+        req.on('data', (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > 16 * 1024 * 1024) {
+            aborted = true;
+            res.writeHead(413, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'That file is too large (16MB limit).' }));
+            req.destroy();
+            return;
+          }
+          chunks.push(chunk);
+        });
         req.on('end', () => {
+          if (aborted) return;
           void rom
             .install(Buffer.concat(chunks))
             .then((installed) => {

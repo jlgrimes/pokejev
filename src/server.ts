@@ -88,7 +88,15 @@ async function installRom(upload: Buffer): Promise<{ title: string; size: number
   }
 
   events.log('info', `ROM installed: ${info.title}`);
-  if (!runner) void startPlaying(rom);
+  // Deliberately not awaited: this runs the game for as long as the process
+  // lives. It must still be caught — an unhandled rejection takes the whole
+  // process down, which the browser only sees as an unparseable proxy error.
+  if (!runner) {
+    void startPlaying(rom).catch((error: Error) => {
+      console.error(`Could not start playing: ${error.stack ?? error.message}`);
+      events.log('error', `Could not start playing: ${error.message}`);
+    });
+  }
   return { title: info.title, size: info.size, source };
 }
 
@@ -204,9 +212,21 @@ events.on('decision', (decision) => {
   console.log(`${tag} ${decision.action}${decision.detail ? ` — ${decision.detail}` : ''}`);
 });
 
+// Never let a stray rejection kill the server: it takes the viewer down with
+// it, and all the browser can report is that the proxy returned something it
+// could not parse.
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+  console.error(`Unhandled rejection: ${message}`);
+  events.log('error', `Unhandled error: ${message.split('\n')[0]}`);
+});
+
 const rom = await findRom();
 if (rom) {
-  await startPlaying(rom);
+  await startPlaying(rom).catch((error: Error) => {
+    console.error(`Could not start playing: ${error.stack ?? error.message}`);
+    events.log('error', `Could not start playing: ${error.message}`);
+  });
 } else {
   console.log('No ROM yet — open the page and upload one (a .gb, or the .zip it came in).');
 }

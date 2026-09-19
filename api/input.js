@@ -143,27 +143,27 @@ import { readFile as readFile2 } from "node:fs/promises";
 import { put, get, del, head } from "@vercel/blob";
 import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises";
 import { dirname as dirname2, join } from "node:path";
-var LOCAL_ROOT = process.env.LOCAL_STORAGE_DIR ?? ".data";
+var localRoot = () => process.env.LOCAL_STORAGE_DIR ?? ".data";
 var localStorage = {
   kind: "local",
   async read(key) {
     try {
-      return await readFile(join(LOCAL_ROOT, key));
+      return await readFile(join(localRoot(), key));
     } catch {
       return null;
     }
   },
   async write(key, data) {
-    const path = join(LOCAL_ROOT, key);
+    const path = join(localRoot(), key);
     await mkdir(dirname2(path), { recursive: true });
     await writeFile(path, data);
   },
   async remove(key) {
-    await unlink(join(LOCAL_ROOT, key)).catch(() => {
+    await unlink(join(localRoot(), key)).catch(() => {
     });
   },
   async stat(key) {
-    return await stat(join(LOCAL_ROOT, key)).then((info) => info.size).catch(() => null);
+    return await stat(join(localRoot(), key)).then((info) => info.size).catch(() => null);
   }
 };
 var blobStorage = {

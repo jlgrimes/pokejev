@@ -328,11 +328,32 @@ function showBanner(html) {
 }
 
 /* ---- driving the run ---------------------------------------------------- */
+/**
+ * Read a response without hiding what actually came back.
+ *
+ * `response.json()` on an HTML error page or an empty body throws a parser
+ * error ("The string did not match the expected pattern." in Safari), which
+ * tells you nothing about the real failure. Read text first and report the
+ * status and a snippet instead.
+ */
+async function readJsonOrExplain(response) {
+  const text = await response.text();
+  if (!text) throw new Error(`HTTP ${response.status} with an empty response`);
+  try {
+    const data = JSON.parse(text);
+    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    return data;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      const snippet = text.replace(/\s+/g, ' ').slice(0, 160);
+      throw new Error(`HTTP ${response.status}: ${snippet}`);
+    }
+    throw error;
+  }
+}
+
 async function call(path, options) {
-  const response = await fetch(api(path), options);
-  const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-  if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-  return data;
+  return readJsonOrExplain(await fetch(api(path), options));
 }
 
 async function tickOnce() {
@@ -445,8 +466,7 @@ async function uploadRom(file) {
   try {
     // Sent as a raw body: no multipart parsing needed on the other side.
     const response = await fetch('/api/rom', { method: 'POST', body: file });
-    const data = await response.json();
-    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    const data = await readJsonOrExplain(response);
 
     romStatus(`Installed ${data.title} (${(data.size / 1024 / 1024).toFixed(0)}MB) from ${data.source}.`, 'ok');
     log(`ROM installed: ${data.title}`);
