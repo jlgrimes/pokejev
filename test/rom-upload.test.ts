@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { listZipEntries, isZip } from '../api/_lib/zip.ts';
+import { listZipEntries, isZip } from '../server/_lib/zip.ts';
 import { inspectRom } from '../src/game/rom.ts';
 import { buildTestRom } from './helpers/test-rom.ts';
 import { makeZip, asPokemonRed } from './helpers/make-zip.ts';
@@ -61,14 +61,14 @@ describe('ROM validation', () => {
 });
 
 describe('the upload route', () => {
-  let rom: typeof import('../api/rom.ts').default;
+  let rom: typeof import('../server/rom.ts').default;
 
   before(async () => {
     process.env.LOCAL_STORAGE_DIR = join(mkdtempSync(join(tmpdir(), 'jev-rom-')), 'storage');
     delete process.env.BLOB_READ_WRITE_TOKEN;
     delete process.env.BLOB_STORE_ID;
     delete process.env.VERCEL;
-    rom = (await import('../api/rom.ts')).default;
+    rom = (await import('../server/rom.ts')).default;
   });
 
   const post = (data: Buffer) =>

@@ -15,10 +15,10 @@ import { buildTestRom } from './helpers/test-rom.ts';
 const workDir = mkdtempSync(join(tmpdir(), 'jev-api-'));
 const romPath = join(workDir, 'test.gb');
 
-let state: typeof import('../api/state.ts').default;
-let tick: typeof import('../api/tick.ts').default;
-let input: typeof import('../api/input.ts').default;
-let reset: typeof import('../api/reset.ts').default;
+let state: typeof import('../server/state.ts').default;
+let tick: typeof import('../server/tick.ts').default;
+let input: typeof import('../server/input.ts').default;
+let reset: typeof import('../server/reset.ts').default;
 
 before(async () => {
   writeFileSync(romPath, buildTestRom());
@@ -29,10 +29,10 @@ before(async () => {
   process.env.JEV_VISION = 'false';
   delete process.env.BLOB_READ_WRITE_TOKEN;
 
-  state = (await import('../api/state.ts')).default;
-  tick = (await import('../api/tick.ts')).default;
-  input = (await import('../api/input.ts')).default;
-  reset = (await import('../api/reset.ts')).default;
+  state = (await import('../server/state.ts')).default;
+  tick = (await import('../server/tick.ts')).default;
+  input = (await import('../server/input.ts')).default;
+  reset = (await import('../server/reset.ts')).default;
 });
 
 const url = (path: string, session = 'apitest') =>

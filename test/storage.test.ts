@@ -1,6 +1,6 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { hasBlobCredentials, getStorage } from '../api/_lib/storage.ts';
+import { hasBlobCredentials, getStorage } from '../server/_lib/storage.ts';
 
 /**
  * Credential detection has two valid routes and only one of them involves a

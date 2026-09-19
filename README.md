@@ -230,7 +230,8 @@ src/
   jev/        gateway client, prompts, battle and overworld agents, journal
   harness/    controller, play loop, shared turn logic, frame pump, event bus
   viewer/     SSE server and the browser UI (local)
-api/          serverless routes for the Vercel deployment
+server/       serverless route sources for the Vercel deployment
+api/          generated bundles of those routes (see api/README.md)
 public/       the hosted viewer
 test/         60 tests, including a hand-assembled ROM that tests the emulator
 ```

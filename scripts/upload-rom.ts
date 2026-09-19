@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { put, head } from '@vercel/blob';
 import { inspectRom } from '../src/game/rom.ts';
-import { listZipEntries, isZip } from '../api/_lib/zip.ts';
+import { listZipEntries, isZip } from '../server/_lib/zip.ts';
 
 try {
   process.loadEnvFile('.env');
