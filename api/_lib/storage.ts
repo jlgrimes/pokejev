@@ -64,8 +64,20 @@ const blobStorage: Storage = {
   },
 };
 
+/**
+ * Whether the Blob SDK can authenticate.
+ *
+ * Two routes, and the deployed one does NOT involve a token: when a store is
+ * connected to a Vercel project, the SDK authenticates with the deployment's
+ * own OIDC token and only needs BLOB_STORE_ID to know which store to talk to.
+ * BLOB_READ_WRITE_TOKEN is the explicit alternative, used outside Vercel.
+ */
+export function hasBlobCredentials(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+}
+
 export function getStorage(): Storage {
-  if (process.env.BLOB_READ_WRITE_TOKEN) return blobStorage;
+  if (hasBlobCredentials()) return blobStorage;
 
   // A deployed function has no writable working directory, so falling back to
   // the filesystem here would fail later with an opaque EROFS. Say what is
@@ -74,7 +86,7 @@ export function getStorage(): Storage {
     throw new Error(
       'No Blob store is connected to this project. Create one in the Vercel ' +
         'dashboard (Storage → Create Database → Blob), connect it to this project, ' +
-        'and redeploy so BLOB_READ_WRITE_TOKEN is available.',
+        'and redeploy so BLOB_STORE_ID is available to the functions.',
     );
   }
 

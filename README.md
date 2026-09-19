@@ -145,14 +145,16 @@ team to reach it.
 Two steps are needed before Jev can actually play, because neither a Blob store
 nor a ROM can be created for you:
 
-1. In the Vercel dashboard: **Storage → Create Database → Blob**, and connect it
-   to the `pokejev` project. That injects `BLOB_READ_WRITE_TOKEN`. Redeploy so
-   the functions pick it up.
+1. In the Vercel dashboard: **Storage → Create Database → Blob** (choose
+   **private** access), and connect it to the `pokejev` project. That injects
+   `BLOB_STORE_ID`; redeploy so the functions see it. Note there is no
+   `BLOB_READ_WRITE_TOKEN` — deployed functions authenticate to Blob with their
+   own OIDC token, the same way they authenticate to the AI Gateway.
 2. Upload your own ROM:
 
 ```bash
 vercel link                      # pick the pokejev project
-vercel env pull .env             # fetch BLOB_READ_WRITE_TOKEN
+vercel env pull .env             # fetch BLOB_STORE_ID + VERCEL_OIDC_TOKEN
 npm run upload-rom -- roms/pokemon_red.gb
 ```
 

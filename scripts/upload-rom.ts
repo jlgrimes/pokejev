@@ -20,11 +20,18 @@ try {
 const path = process.argv[2] ?? process.env.ROM_PATH ?? 'roms/pokemon_red.gb';
 const key = process.env.ROM_BLOB_KEY ?? 'rom/pokemon_red.gb';
 
-if (!process.env.BLOB_READ_WRITE_TOKEN) {
+// Either an explicit read-write token, or OIDC plus the store id — which is
+// what `vercel env pull` gives you once a store is connected to the project.
+const hasCredentials =
+  Boolean(process.env.BLOB_READ_WRITE_TOKEN) ||
+  Boolean(process.env.BLOB_STORE_ID && process.env.VERCEL_OIDC_TOKEN);
+
+if (!hasCredentials) {
   console.error(
-    '\nBLOB_READ_WRITE_TOKEN is not set.\n' +
-      'Create a Blob store for the project in the Vercel dashboard (Storage → Blob),\n' +
-      'then run `vercel env pull .env` to fetch the token.\n',
+    '\nNo Blob credentials found.\n' +
+      'Connect a Blob store to the project in the Vercel dashboard (Storage → Blob),\n' +
+      'then run `vercel env pull .env` to fetch BLOB_STORE_ID and VERCEL_OIDC_TOKEN.\n' +
+      '(A BLOB_READ_WRITE_TOKEN from the store\'s settings also works.)\n',
   );
   process.exit(1);
 }
