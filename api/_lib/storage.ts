@@ -65,5 +65,18 @@ const blobStorage: Storage = {
 };
 
 export function getStorage(): Storage {
-  return process.env.BLOB_READ_WRITE_TOKEN ? blobStorage : localStorage;
+  if (process.env.BLOB_READ_WRITE_TOKEN) return blobStorage;
+
+  // A deployed function has no writable working directory, so falling back to
+  // the filesystem here would fail later with an opaque EROFS. Say what is
+  // actually missing instead.
+  if (process.env.VERCEL) {
+    throw new Error(
+      'No Blob store is connected to this project. Create one in the Vercel ' +
+        'dashboard (Storage → Create Database → Blob), connect it to this project, ' +
+        'and redeploy so BLOB_READ_WRITE_TOKEN is available.',
+    );
+  }
+
+  return localStorage;
 }

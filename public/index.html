@@ -321,7 +321,9 @@ async function tickOnce() {
   } catch (error) {
     log(error.message, 'error');
     setPlaying(false);
-    if (/No ROM found/i.test(error.message)) {
+    if (/No Blob store/i.test(error.message)) {
+      showBanner('No Blob store connected. Create one in the Vercel dashboard (Storage → Create Database → Blob), connect it to this project, and redeploy.');
+    } else if (/No ROM found/i.test(error.message)) {
       showBanner('No ROM in the Blob store. Upload your own dump with <code>npm run upload-rom -- path/to/rom.gb</code>, then reload.');
     } else if (/AI_GATEWAY_API_KEY/i.test(error.message)) {
       showBanner('The deployment has no <code>AI_GATEWAY_API_KEY</code>. Add it in Project Settings → Environment Variables and redeploy.');
@@ -407,9 +409,11 @@ document.addEventListener('keydown', (event) => {
     $('conn').textContent = 'error';
     log(error.message, 'error');
     showBanner(
-      /No ROM found/i.test(error.message)
-        ? 'No ROM in the Blob store. Upload your own dump with <code>npm run upload-rom -- path/to/rom.gb</code>, then reload.'
-        : esc(error.message),
+      /No Blob store/i.test(error.message)
+        ? 'No Blob store connected. Create one in the Vercel dashboard (Storage → Create Database → Blob), connect it to this project, and redeploy.'
+        : /No ROM found/i.test(error.message)
+          ? 'No ROM in the Blob store. Upload your own dump with <code>npm run upload-rom -- path/to/rom.gb</code>, then reload.'
+          : esc(error.message),
     );
   }
 })();
