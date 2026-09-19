@@ -174,9 +174,14 @@ export class GameBoy {
     this.#frames = snapshot.frames;
   }
 
+  /**
+   * Write a snapshot to disk. The ROM is left out — it is reloaded from the
+   * cartridge on restore, so including a copy in every autosave just burns
+   * megabytes of disk and write bandwidth.
+   */
   writeStateFile(path: string): void {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(this.saveState()));
+    writeFileSync(path, JSON.stringify(this.saveState({ includeRom: false })));
   }
 
   readStateFile(path: string): void {

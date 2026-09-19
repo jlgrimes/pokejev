@@ -1,0 +1,10 @@
+node_modules
+.git
+out
+.data
+saves
+roms
+test
+api
+*.log
+.env

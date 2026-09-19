@@ -22,6 +22,36 @@ export interface ViewerHandle {
   close(): Promise<void>;
 }
 
+export interface ViewerOptions {
+  /**
+   * Shared secret required to view or control the run.
+   *
+   * Unset means open access, which is correct on localhost and wrong on a
+   * public host: without it anyone with the URL could watch the stream and
+   * press buttons. The container entrypoint therefore always supplies one.
+   */
+  token?: string | undefined;
+}
+
+const COOKIE_NAME = 'jev_key';
+
+/** Constant-time-ish comparison, so the token cannot be guessed byte by byte. */
+function tokensMatch(expected: string, supplied: string | undefined): boolean {
+  if (!supplied || supplied.length !== expected.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) {
+    mismatch |= expected.charCodeAt(i) ^ supplied.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
+function cookieValue(header: string | undefined, name: string): string | undefined {
+  return header
+    ?.split(';')
+    .map((part) => part.trim().split('='))
+    .find(([key]) => key === name)?.[1];
+}
+
 /**
  * A dependency-free live viewer.
  *
@@ -34,7 +64,9 @@ export function startViewer(
   events: JevEvents,
   controls: ViewerControls,
   port = 8080,
+  options: ViewerOptions = {},
 ): Promise<ViewerHandle> {
+  const token = options.token;
   const clients = new Set<ServerResponse>();
   /** Last value of each event type, so a browser that joins late sees state immediately. */
   const latest = new Map<string, unknown>();
@@ -57,6 +89,32 @@ export function startViewer(
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
+
+    // Liveness probe for the host; deliberately unauthenticated and empty.
+    if (url.pathname === '/healthz') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, paused: controls.isPaused() }));
+      return;
+    }
+
+    if (token) {
+      const supplied = url.searchParams.get('key') ?? cookieValue(req.headers.cookie, COOKIE_NAME);
+      if (!tokensMatch(token, supplied ?? undefined)) {
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(
+          '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
+            '<body style="font:14px ui-monospace,monospace;background:#0f1216;color:#e6e9ee;padding:32px">' +
+            '<h1 style="font-size:15px">Jev plays Pok\u00e9mon Red</h1>' +
+            '<p style="color:#8c96a3">This run is private. Open it with <code>?key=…</code> appended to the URL.</p>' +
+            '</body>',
+        );
+        return;
+      }
+      // Remember it, so the SSE stream and control posts do not each need the key.
+      if (url.searchParams.get('key')) {
+        res.setHeader('set-cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+      }
+    }
 
     if (url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });

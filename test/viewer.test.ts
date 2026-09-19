@@ -163,6 +163,28 @@ describe('the play loop', () => {
     assert.ok(gb.frameCount > 10, 'the emulator should have advanced');
   });
 
+  test('continues the turn count of a resumed run', async () => {
+    const gb = new GameBoy();
+    gb.loadRom(buildTestRom());
+    // A journal carried over from an earlier session.
+    const journal = { ...emptyJournal() };
+    journal.stats.turns = 630;
+
+    const runner = new JevRunner({
+      gb,
+      config: loadConfig({ offline: true, vision: false }),
+      journal,
+      journalPath: join(mkdtempSync(join(tmpdir(), 'jev-')), 'journal.json'),
+      maxTurns: 2,
+    });
+
+    assert.equal(runner.turns, 630, 'should start from the saved count, not zero');
+    await runner.run();
+    // maxTurns limits this session, and the cumulative count moves forward.
+    assert.equal(runner.turns, 632);
+    assert.equal(runner.journal.stats.turns, 632);
+  });
+
   test('pause and step are honoured', async () => {
     const gb = new GameBoy();
     gb.loadRom(buildTestRom());

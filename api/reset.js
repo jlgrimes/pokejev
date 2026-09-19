@@ -122,9 +122,14 @@ var GameBoy = class _GameBoy {
     saveStateModule.returnFromState.call(this.#core, state);
     this.#frames = snapshot.frames;
   }
+  /**
+   * Write a snapshot to disk. The ROM is left out — it is reloaded from the
+   * cartridge on restore, so including a copy in every autosave just burns
+   * megabytes of disk and write bandwidth.
+   */
   writeStateFile(path) {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(this.saveState()));
+    writeFileSync(path, JSON.stringify(this.saveState({ includeRom: false })));
   }
   readStateFile(path) {
     this.loadState(JSON.parse(readFileSync(path, "utf8")));

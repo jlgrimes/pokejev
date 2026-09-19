@@ -46,7 +46,10 @@ export class JevRunner implements ViewerControls {
   #stepRequested = false;
   #stopped = false;
   #inputQueue: Button[] = [];
+  /** Cumulative turns across every session of this run, taken from the journal. */
   #turns = 0;
+  /** Turns played since this process started; what `maxTurns` limits. */
+  #turnsThisRun = 0;
   #wasInBattle = false;
 
   constructor(options: RunnerOptions) {
@@ -57,6 +60,9 @@ export class JevRunner implements ViewerControls {
     this.events = options.events ?? new JevEvents();
     this.#controller = new Controller(options.gb);
     this.#paused = options.startPaused ?? false;
+    // Continue counting from where the saved run left off; starting at zero
+    // would walk the journal's turn count backwards on every restart.
+    this.#turns = options.journal.stats.turns ?? 0;
     this.#pump = new FramePump(this.events);
     this.#pump.attach(options.gb);
   }
@@ -77,7 +83,7 @@ export class JevRunner implements ViewerControls {
     this.#emitStatus();
     const maxTurns = this.#options.maxTurns ?? Infinity;
 
-    while (!this.#stopped && this.#turns < maxTurns) {
+    while (!this.#stopped && this.#turnsThisRun < maxTurns) {
       await this.#waitWhilePaused();
       if (this.#stopped) break;
 
@@ -91,6 +97,7 @@ export class JevRunner implements ViewerControls {
       await this.#takeTurn(state, analysis);
 
       this.#turns++;
+      this.#turnsThisRun++;
       this.#journal.stats.turns = this.#turns;
       this.#emitStatus();
 
@@ -101,7 +108,7 @@ export class JevRunner implements ViewerControls {
       }
 
       const autosaveEvery = this.#options.autosaveEvery ?? 25;
-      if (this.#turns % autosaveEvery === 0) this.#autosave();
+      if (this.#turnsThisRun % autosaveEvery === 0) this.#autosave();
 
       // Yield so the viewer's socket flushes and controls stay responsive.
       await sleep(0);

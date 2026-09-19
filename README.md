@@ -198,6 +198,63 @@ Add `?session=<name>` to any of them to run several independent games.
 - Ticks are not concurrency-safe: two browsers driving the same `session` will
   fight over the snapshot. Use a different `session` per tab.
 
+## Running it always-on (recommended)
+
+The serverless deployment rebuilds the Game Boy from storage on every request.
+That works, but it pays a snapshot decompress, emulator restore, recompress and
+write *per request*, and it only plays while a browser is driving it.
+
+`src/server.ts` is the other shape: **one long-lived process** that holds the
+emulator in memory and plays continuously. No per-turn serialisation at all, and
+closing the tab stops nothing. This is what the harness was built for.
+
+```bash
+docker build -t pokejev .
+docker run -p 8080:8080 -v jev-data:/data \
+  -e AI_GATEWAY_API_KEY=... -e BLOB_READ_WRITE_TOKEN=... \
+  -e JEV_MODEL=jev -e JEV_BATTLE_MODEL=jev \
+  pokejev
+```
+
+### Deploying from a phone
+
+`render.yaml` is a Blueprint, so no terminal is needed: **render.com → New →
+Blueprint → connect the repo → pick this branch.** It reads the file and
+prompts for the two secrets. Railway and Fly work the same way from their web
+UIs; only the config file differs.
+
+Two environment variables matter, and both differ from the Vercel deployment:
+
+- **`AI_GATEWAY_API_KEY`** — required. The Vercel deployment authenticates to
+  the gateway with its own OIDC token; nothing outside Vercel can do that, so
+  the container needs a real key.
+- **`BLOB_READ_WRITE_TOKEN`** — how it finds the ROM you already uploaded, and
+  where it persists progress. Create one on the Blob store in the Vercel
+  dashboard. Without it the server falls back to `DATA_DIR` on disk, which needs
+  a mounted volume to survive a redeploy — and it has no way to get the ROM.
+
+Pick a plan that does not sleep when idle. A free tier that suspends on
+inactivity will stop Jev playing, which defeats the point.
+
+### Access
+
+The viewer is not public. The server requires a key, generated at boot and
+printed to the logs, or pinned with `JEV_ACCESS_TOKEN`:
+
+```
+Watch Jev play:  https://your-app.onrender.com/?key=…
+```
+
+The key is remembered in a cookie after the first visit. `/healthz` is
+deliberately open so the host's health check can reach it.
+
+### Persistence
+
+Progress is written to durable storage every `JEV_PERSIST_EVERY` turns (default
+10) and on `SIGTERM`, so a restart resumes the same run — same party, same
+position, same journal. The snapshot has the ROM stripped out of it, which is
+the difference between 3.3MB and 440KB per write.
+
 ## Configuration
 
 Jev's brain is one env var. Any gateway model works, and battles can use a
@@ -230,6 +287,7 @@ src/
   jev/        gateway client, prompts, battle and overworld agents, journal
   harness/    controller, play loop, shared turn logic, frame pump, event bus
   viewer/     SSE server and the browser UI (local)
+src/server.ts the always-on server entrypoint (Docker / Render / Fly)
 server/       serverless route sources for the Vercel deployment
 api/          generated bundles of those routes (see api/README.md)
 public/       the hosted viewer
