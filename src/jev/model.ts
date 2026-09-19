@@ -19,7 +19,12 @@ export interface JevConfig {
   fairPlay: boolean;
   /** Skip the model entirely and play with the built-in heuristics. */
   offline: boolean;
-  temperature: number;
+  /**
+   * Only sent when explicitly set. Several models (including whatever `jev`
+   * routes to) reject it, and the SDK warns on every call when it is supplied
+   * anyway.
+   */
+  temperature: number | undefined;
 }
 
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5';
@@ -38,7 +43,7 @@ export function loadConfig(overrides: Partial<JevConfig> = {}): JevConfig {
     vision: process.env.JEV_VISION !== 'false',
     fairPlay: process.env.JEV_FAIR_PLAY === 'true',
     offline: false,
-    temperature: Number(process.env.JEV_TEMPERATURE ?? 0.3),
+    temperature: process.env.JEV_TEMPERATURE ? Number(process.env.JEV_TEMPERATURE) : undefined,
     ...overrides,
   };
 }

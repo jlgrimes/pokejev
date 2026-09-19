@@ -63,14 +63,16 @@ describe('deployed API', () => {
     assert.equal(body.turns, 0);
   });
 
-  test('a tick runs one decision and returns the animation', async () => {
+  test('a tick runs decisions and returns the animation', async () => {
     const response = await tick(post('tick'));
     const body = await bodyOf(response);
 
     assert.equal(response.status, 200);
-    assert.equal(body.turns, 1);
-    assert.equal(body.decision.turn, 1);
-    assert.ok(body.decision.action, 'the decision should name an action');
+    // One request plays several turns, so the counter jumps by more than one.
+    assert.ok(body.turns >= 1, `expected at least one turn, got ${body.turns}`);
+    assert.ok(Array.isArray(body.decisions) && body.decisions.length >= 1);
+    assert.equal(body.decisions.at(-1).turn, body.turns);
+    assert.ok(body.decisions[0].action, 'each decision should name an action');
     assert.ok(body.frames.length > 1, 'a tick should produce several frames');
     // Frames are base64 PNGs.
     assert.equal(Buffer.from(body.frames[0], 'base64').subarray(1, 4).toString('ascii'), 'PNG');
@@ -82,7 +84,7 @@ describe('deployed API', () => {
 
     // Nothing is shared in memory between handler calls: the only way the turn
     // counter advances is through the persisted snapshot.
-    assert.equal(second.turns, first.turns + 1);
+    assert.ok(second.turns > first.turns, `${first.turns} → ${second.turns}`);
 
     const observed = await bodyOf(await state(new Request(url('state'))));
     assert.equal(observed.turns, second.turns);

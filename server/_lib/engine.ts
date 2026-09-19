@@ -6,10 +6,10 @@ import { analyzeIfBattle } from '../../src/harness/turn.ts';
 import type { JevConfig } from '../../src/jev/model.ts';
 import type { Journal } from '../../src/jev/journal.ts';
 
-/** Frames are captured every other emulated frame, i.e. 30fps of game time. */
-const CAPTURE_EVERY = 2;
-/** ~5 seconds of footage. Enough for any single action, bounded for payload size. */
-const MAX_FRAMES = 150;
+/** Start by capturing every other emulated frame, i.e. 30fps of game time. */
+const INITIAL_STRIDE = 2;
+/** ~8 seconds of playback. Bounds the response regardless of how long a tick ran. */
+const MAX_FRAMES = 240;
 
 /**
  * Records the animation produced by a tick so the browser can play it back.
@@ -17,18 +17,33 @@ const MAX_FRAMES = 150;
  * Without this the viewer would only ever see the final still frame of each
  * decision and the game would look like a slideshow. Frames are cheap: a
  * four-colour 160x144 PNG is a couple of KB.
+ *
+ * A tick now runs many decisions, so the footage can be arbitrarily long.
+ * Rather than capture the first N frames and drop the rest — which would show
+ * the start of the tick and silently discard everything after — the recorder
+ * halves its buffer and doubles its stride whenever it fills. The result
+ * always spans the whole tick, just at a coarser sample rate the longer it ran.
  */
 export class FrameRecorder {
   #frames: string[] = [];
   #counter = 0;
+  #stride = INITIAL_STRIDE;
 
   attach(gb: GameBoy): void {
     gb.onFrame = (emulator) => {
       this.#counter++;
-      if (this.#counter % CAPTURE_EVERY !== 0) return;
-      if (this.#frames.length >= MAX_FRAMES) return;
+      if (this.#counter % this.#stride !== 0) return;
       this.#frames.push(screenToPng(emulator.screen(), 1).toString('base64'));
+      if (this.#frames.length >= MAX_FRAMES) {
+        this.#frames = this.#frames.filter((_, index) => index % 2 === 0);
+        this.#stride *= 2;
+      }
     };
+  }
+
+  /** How many emulated frames each captured frame now represents. */
+  get stride(): number {
+    return this.#stride;
   }
 
   detach(gb: GameBoy): void {

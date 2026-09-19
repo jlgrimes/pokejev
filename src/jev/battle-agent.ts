@@ -89,7 +89,7 @@ export async function decideBattleAction(
       schema: BattleDecisionSchema,
       system: JEV_IDENTITY,
       prompt: `${BATTLE_INSTRUCTIONS}\n\n${briefing}`,
-      temperature: config.temperature,
+      ...(config.temperature === undefined ? {} : { temperature: config.temperature }),
       providerOptions: providerOptions(config),
     });
     return { decision: sanitize(result.object, analysis), usedFallback: false };

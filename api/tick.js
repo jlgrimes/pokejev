@@ -1758,7 +1758,7 @@ function loadConfig(overrides = {}) {
     vision: process.env.JEV_VISION !== "false",
     fairPlay: process.env.JEV_FAIR_PLAY === "true",
     offline: false,
-    temperature: Number(process.env.JEV_TEMPERATURE ?? 0.3),
+    temperature: process.env.JEV_TEMPERATURE ? Number(process.env.JEV_TEMPERATURE) : void 0,
     ...overrides
   };
 }
@@ -1928,7 +1928,7 @@ async function decideBattleAction(config, state, analysis, journal) {
       prompt: `${BATTLE_INSTRUCTIONS}
 
 ${briefing}`,
-      temperature: config.temperature,
+      ...config.temperature === void 0 ? {} : { temperature: config.temperature },
       providerOptions: providerOptions(config)
     });
     return { decision: sanitize(result.object, analysis), usedFallback: false };
@@ -1999,7 +1999,8 @@ ${briefing}`;
   const content = screenshot && config.vision ? [
     { type: "text", text },
     { type: "text", text: "Here is the current screen as an image:" },
-    { type: "image", image: screenshot }
+    // A `file` part with an explicit media type; the `image` part is deprecated.
+    { type: "file", data: screenshot, mediaType: "image/png" }
   ] : [{ type: "text", text }];
   try {
     const result = await generateObject2({
@@ -2007,7 +2008,7 @@ ${briefing}`;
       schema: ButtonPlanSchema,
       system: JEV_IDENTITY,
       messages: [{ role: "user", content }],
-      temperature: config.temperature,
+      ...config.temperature === void 0 ? {} : { temperature: config.temperature },
       providerOptions: providerOptions(config)
     });
     return { plan: result.object, usedFallback: false };
@@ -2126,18 +2127,26 @@ async function takeOverworldTurn(params) {
 }
 
 // server/_lib/engine.ts
-var CAPTURE_EVERY = 2;
-var MAX_FRAMES = 150;
+var INITIAL_STRIDE = 2;
+var MAX_FRAMES = 240;
 var FrameRecorder = class {
   #frames = [];
   #counter = 0;
+  #stride = INITIAL_STRIDE;
   attach(gb) {
     gb.onFrame = (emulator) => {
       this.#counter++;
-      if (this.#counter % CAPTURE_EVERY !== 0) return;
-      if (this.#frames.length >= MAX_FRAMES) return;
+      if (this.#counter % this.#stride !== 0) return;
       this.#frames.push(screenToPng(emulator.screen(), 1).toString("base64"));
+      if (this.#frames.length >= MAX_FRAMES) {
+        this.#frames = this.#frames.filter((_, index) => index % 2 === 0);
+        this.#stride *= 2;
+      }
     };
+  }
+  /** How many emulated frames each captured frame now represents. */
+  get stride() {
+    return this.#stride;
   }
   detach(gb) {
     gb.onFrame = null;
@@ -2348,32 +2357,43 @@ var Controller = class {
 };
 
 // server/tick.ts
+var PLAY_BUDGET_MS = 4e4;
+var MAX_DECISIONS = 24;
 async function POST(request) {
   try {
     const sessionId = sessionIdFrom(request);
-    const jevConfig = loadConfig({
-      offline: process.env.JEV_OFFLINE === "true"
-    });
+    const jevConfig = loadConfig({ offline: process.env.JEV_OFFLINE === "true" });
     const { gb, journal, turns } = await openSession(sessionId);
     const recorder = new FrameRecorder();
     recorder.attach(gb);
-    const state = readGameState(gb);
-    const outcome = await takeTurn({
-      gb,
-      controller: new Controller(gb),
-      config: jevConfig,
-      journal,
-      state,
-      analysis: analyzeIfBattle(state, jevConfig)
-    });
+    const controller = new Controller(gb);
+    const decisions = [];
+    const startedAt = Date.now();
+    let turn = turns;
+    do {
+      const state = readGameState(gb);
+      const outcome = await takeTurn({
+        gb,
+        controller,
+        config: jevConfig,
+        journal,
+        state,
+        analysis: analyzeIfBattle(state, jevConfig)
+      });
+      turn++;
+      decisions.push({ ...outcome, turn });
+    } while (Date.now() - startedAt < PLAY_BUDGET_MS && decisions.length < MAX_DECISIONS);
     const frames = recorder.finish(gb);
-    const nextTurn = turns + 1;
-    journal.stats.turns = nextTurn;
-    const bytes = await saveSession(sessionId, gb, journal, nextTurn);
+    journal.stats.turns = turn;
+    const bytes = await saveSession(sessionId, gb, journal, turn);
     return json({
-      ...describe(gb, journal, nextTurn, jevConfig),
-      decision: { ...outcome, turn: nextTurn },
+      ...describe(gb, journal, turn, jevConfig),
+      decisions,
+      // The most recent decision, so older clients and the compact UI still work.
+      decision: decisions[decisions.length - 1],
       frames,
+      frameStride: recorder.stride,
+      elapsedMs: Date.now() - startedAt,
       snapshotBytes: bytes
     });
   } catch (error) {

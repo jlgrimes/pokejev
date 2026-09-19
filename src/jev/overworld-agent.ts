@@ -80,7 +80,8 @@ export async function planOverworld(
     ? [
         { type: 'text' as const, text },
         { type: 'text' as const, text: 'Here is the current screen as an image:' },
-        { type: 'image' as const, image: screenshot },
+        // A `file` part with an explicit media type; the `image` part is deprecated.
+        { type: 'file' as const, data: screenshot, mediaType: 'image/png' },
       ]
     : [{ type: 'text' as const, text }];
 
@@ -90,7 +91,7 @@ export async function planOverworld(
       schema: ButtonPlanSchema,
       system: JEV_IDENTITY,
       messages: [{ role: 'user', content }],
-      temperature: config.temperature,
+      ...(config.temperature === undefined ? {} : { temperature: config.temperature }),
       providerOptions: providerOptions(config),
     });
     return { plan: result.object, usedFallback: false };

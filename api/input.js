@@ -1726,7 +1726,7 @@ function loadConfig(overrides = {}) {
     vision: process.env.JEV_VISION !== "false",
     fairPlay: process.env.JEV_FAIR_PLAY === "true",
     offline: false,
-    temperature: Number(process.env.JEV_TEMPERATURE ?? 0.3),
+    temperature: process.env.JEV_TEMPERATURE ? Number(process.env.JEV_TEMPERATURE) : void 0,
     ...overrides
   };
 }
@@ -1763,18 +1763,26 @@ function analyzeIfBattle(state, config) {
 }
 
 // server/_lib/engine.ts
-var CAPTURE_EVERY = 2;
-var MAX_FRAMES = 150;
+var INITIAL_STRIDE = 2;
+var MAX_FRAMES = 240;
 var FrameRecorder = class {
   #frames = [];
   #counter = 0;
+  #stride = INITIAL_STRIDE;
   attach(gb) {
     gb.onFrame = (emulator) => {
       this.#counter++;
-      if (this.#counter % CAPTURE_EVERY !== 0) return;
-      if (this.#frames.length >= MAX_FRAMES) return;
+      if (this.#counter % this.#stride !== 0) return;
       this.#frames.push(screenToPng(emulator.screen(), 1).toString("base64"));
+      if (this.#frames.length >= MAX_FRAMES) {
+        this.#frames = this.#frames.filter((_, index) => index % 2 === 0);
+        this.#stride *= 2;
+      }
     };
+  }
+  /** How many emulated frames each captured frame now represents. */
+  get stride() {
+    return this.#stride;
   }
   detach(gb) {
     gb.onFrame = null;

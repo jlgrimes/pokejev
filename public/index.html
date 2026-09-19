@@ -221,8 +221,9 @@ let playing = false;
 let busy = false;
 
 setInterval(() => {
-  // More than ~3s of backlog means we are behind; skip ahead rather than lag.
-  if (queue.length > 90) queue.splice(0, queue.length - 90);
+  // A tick can return several seconds of footage. Keep at most ~4s queued so
+  // the picture stays close to the emulator rather than drifting behind it.
+  if (queue.length > 120) queue.splice(0, queue.length - 120);
   const png = queue.shift();
   if (png) $('screen').src = 'data:image/png;base64,' + png;
 }, 33);
@@ -341,7 +342,12 @@ async function tickOnce() {
     const data = await call('tick', { method: 'POST' });
     enqueue(data.frames);
     applyView(data);
-    addThought(data.decision);
+    // One request now covers many decisions; show them oldest-first so the
+    // panel reads in the order Jev actually made them.
+    for (const decision of data.decisions ?? [data.decision]) addThought(decision);
+    if (data.elapsedMs) {
+      log(`played ${(data.decisions ?? []).length} turns in ${(data.elapsedMs / 1000).toFixed(0)}s`);
+    }
     $('banner').hidden = true;
   } catch (error) {
     log(error.message, 'error');
@@ -372,9 +378,9 @@ function setPlaying(next) {
 async function loop() {
   while (playing) {
     await tickOnce();
-    // Let the animation drain before asking for more, so the picture keeps
-    // moving instead of jumping ahead of what you can see.
-    while (playing && queue.length > 45) await sleep(120);
+    // Let the animation drain a little before asking for more, but keep the
+    // next request in flight early so the server is never idle waiting on us.
+    while (playing && queue.length > 60) await sleep(100);
   }
 }
 

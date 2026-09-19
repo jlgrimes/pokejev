@@ -4,6 +4,7 @@ import { GameBoy } from '../src/emulator/gameboy.ts';
 import { screenToPng } from '../src/emulator/png.ts';
 import { readScreenText } from '../src/game/screen.ts';
 import { buildTestRom, TEST_ADDR } from './helpers/test-rom.ts';
+import { FrameRecorder } from '../server/_lib/engine.ts';
 
 function bootTestRom(): GameBoy {
   const gb = new GameBoy();
@@ -99,5 +100,42 @@ describe('screen text decoding', () => {
     assert.equal(screen.rows.length, 18);
     assert.ok(screen.rows[0]!.startsWith('HELLO'), `got ${JSON.stringify(screen.rows[0])}`);
     assert.ok(screen.flat.includes('HELLO'));
+  });
+});
+
+describe('frame recording', () => {
+  test('captures a short burst at full rate', () => {
+    const gb = bootTestRom();
+    const recorder = new FrameRecorder();
+    recorder.attach(gb);
+    gb.advance(60);
+    const frames = recorder.finish(gb);
+
+    // Every other frame, plus the closing still.
+    assert.equal(recorder.stride, 2);
+    assert.equal(frames.length, 31);
+  });
+
+  test('keeps a long tick bounded without dropping its ending', () => {
+    const gb = bootTestRom();
+    const recorder = new FrameRecorder();
+    recorder.attach(gb);
+    gb.advance(3000); // far more footage than the cap allows
+    const frames = recorder.finish(gb);
+
+    assert.ok(frames.length <= 241, `expected a bounded buffer, got ${frames.length}`);
+    // Coverage is kept by sampling more coarsely, not by truncating early.
+    assert.ok(recorder.stride > 2, `stride should have grown, was ${recorder.stride}`);
+    assert.ok(frames.length > 100, 'should still return a watchable amount of footage');
+  });
+
+  test('always ends on the current screen', () => {
+    const gb = bootTestRom();
+    const recorder = new FrameRecorder();
+    recorder.attach(gb);
+    gb.advance(10);
+    const frames = recorder.finish(gb);
+    const last = Buffer.from(frames.at(-1)!, 'base64');
+    assert.equal(last.subarray(1, 4).toString('ascii'), 'PNG');
   });
 });
