@@ -114,6 +114,34 @@ describe('live viewer', () => {
     assert.equal((received.get('status') as { turns: number }).turns, 7);
   });
 
+  test('accepts a key containing characters a URL would mangle', async () => {
+    const events = new JevEvents();
+    // Hosts generate base64-ish secrets. `+` is the dangerous one: query
+    // parsing turns it into a space, so a correct key gets rejected.
+    const token = 'ab+cd/ef=gh';
+    const handle = await startViewer(events, stubControls().controls, 0, { token });
+    handles.push(handle);
+
+    const status = (path: string) => fetch(`${handle.url}${path}`).then((r) => r.status);
+
+    assert.equal(await status(`/?key=${token}`), 200, 'raw + must work');
+    assert.equal(await status(`/?key=${encodeURIComponent(token)}`), 200, 'encoded must work');
+    assert.equal(await status('/?key=wrong'), 401);
+    assert.equal(await status('/'), 401);
+    // The health check stays reachable so hosts can probe it.
+    assert.equal(await status('/healthz'), 200);
+  });
+
+  test('the sign-in page offers somewhere to paste the key', async () => {
+    const events = new JevEvents();
+    const handle = await startViewer(events, stubControls().controls, 0, { token: 'secret' });
+    handles.push(handle);
+
+    const html = await fetch(handle.url).then((r) => r.text());
+    assert.match(html, /<form/, 'editing a URL by hand is not an acceptable sign-in');
+    assert.match(html, /JEV_ACCESS_TOKEN/, 'should say where to find the key');
+  });
+
   test('control buttons reach the runner', async () => {
     const events = new JevEvents();
     const stub = stubControls();

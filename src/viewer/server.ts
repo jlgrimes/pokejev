@@ -67,6 +67,54 @@ function cookieValue(header: string | undefined, name: string): string | undefin
 }
 
 /**
+ * Every form the key might legitimately arrive in.
+ *
+ * `URLSearchParams` decodes `+` as a space, which silently breaks base64-ish
+ * tokens — the kind Render generates — so a correct key gets rejected. Read the
+ * raw query instead and accept both interpretations rather than guessing which
+ * one the host produced.
+ */
+function suppliedKeys(rawUrl: string, cookieHeader: string | undefined): string[] {
+  const candidates: string[] = [];
+  const raw = /[?&]key=([^&]*)/.exec(rawUrl)?.[1];
+  if (raw !== undefined) {
+    const safeDecode = (value: string) => {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    };
+    candidates.push(safeDecode(raw), safeDecode(raw.replace(/\+/g, ' ')), raw);
+  }
+  const cookie = cookieValue(cookieHeader, COOKIE_NAME);
+  if (cookie) candidates.push(cookie, decodeURIComponent(cookie));
+  return candidates;
+}
+
+/** The sign-in page: a box to paste into beats telling someone to edit a URL. */
+function keyPrompt(message: string): string {
+  return `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jev plays Pok\u00e9mon Red</title>
+<body style="font:14px ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f1216;color:#e6e9ee;margin:0;padding:32px 20px">
+<h1 style="font-size:15px;letter-spacing:.08em;text-transform:uppercase"><span style="color:#9bbc0f">Jev</span> plays Pok\u00e9mon Red</h1>
+<p style="color:#8c96a3">${message}</p>
+<form onsubmit="event.preventDefault();location.search='?key='+encodeURIComponent(document.getElementById('k').value.trim())">
+  <input id="k" type="password" autocomplete="current-password" placeholder="access key"
+    style="width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid #252b34;background:#171b21;color:#e6e9ee;font:inherit" />
+  <button type="submit"
+    style="margin-top:12px;padding:12px 18px;border-radius:8px;border:1px solid #6b8c1a;background:#20262e;color:#9bbc0f;font:inherit;cursor:pointer">
+    Open
+  </button>
+</form>
+<p style="color:#8c96a3;font-size:12px;margin-top:20px">
+  It is the <code>JEV_ACCESS_TOKEN</code> value in your host's environment settings.
+</p>
+</body>`;
+}
+
+/**
  * A dependency-free live viewer.
  *
  * Server-sent events push frames, state and Jev's reasoning to the browser as
@@ -113,20 +161,20 @@ export function startViewer(
     }
 
     if (token) {
-      const supplied = url.searchParams.get('key') ?? cookieValue(req.headers.cookie, COOKIE_NAME);
-      if (!tokensMatch(token, supplied ?? undefined)) {
+      const candidates = suppliedKeys(req.url ?? '', req.headers.cookie);
+      if (!candidates.some((candidate) => tokensMatch(token, candidate))) {
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
         res.end(
-          '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
-            '<body style="font:14px ui-monospace,monospace;background:#0f1216;color:#e6e9ee;padding:32px">' +
-            '<h1 style="font-size:15px">Jev plays Pok\u00e9mon Red</h1>' +
-            '<p style="color:#8c96a3">This run is private. Open it with <code>?key=…</code> appended to the URL.</p>' +
-            '</body>',
+          keyPrompt(
+            candidates.length > 0
+              ? 'That key was not accepted. Paste it again below.'
+              : 'This run is private. Paste the access key to watch it.',
+          ),
         );
         return;
       }
       // Remember it, so the SSE stream and control posts do not each need the key.
-      if (url.searchParams.get('key')) {
+      if (/[?&]key=/.test(req.url ?? '')) {
         res.setHeader('set-cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
       }
     }
