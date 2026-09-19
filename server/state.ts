@@ -3,14 +3,12 @@ import { describe, FrameRecorder } from './_lib/engine.ts';
 import { json, fail, sessionIdFrom } from './_lib/http.ts';
 import { loadConfig } from '../src/jev/model.ts';
 
-export const config = { maxDuration: 60 };
-
 /**
  * Current state of a run, without advancing it.
  *
  * Called when the viewer loads so the page is populated before the first tick.
  */
-export default async function handler(request: Request): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
     const sessionId = sessionIdFrom(request);
     const jevConfig = loadConfig();

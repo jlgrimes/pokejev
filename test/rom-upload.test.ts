@@ -61,21 +61,25 @@ describe('ROM validation', () => {
 });
 
 describe('the upload route', () => {
-  let rom: typeof import('../server/rom.ts').default;
+  let romGet: typeof import('../server/rom.ts').GET;
+  let romPost: typeof import('../server/rom.ts').POST;
 
   before(async () => {
     process.env.LOCAL_STORAGE_DIR = join(mkdtempSync(join(tmpdir(), 'jev-rom-')), 'storage');
     delete process.env.BLOB_READ_WRITE_TOKEN;
     delete process.env.BLOB_STORE_ID;
     delete process.env.VERCEL;
-    rom = (await import('../server/rom.ts')).default;
+    const route = await import('../server/rom.ts');
+    romGet = route.GET;
+    romPost = route.POST;
   });
 
   const post = (data: Buffer) =>
     new Request('https://example.test/api/rom', { method: 'POST', body: new Uint8Array(data) });
+  const rom = (request: Request) => romPost(request);
 
   test('reports no ROM before one is installed', async () => {
-    const body = await bodyOf(await rom(new Request('https://example.test/api/rom')));
+    const body = await bodyOf(await romGet());
     assert.equal(body.present, false);
   });
 
@@ -90,7 +94,7 @@ describe('the upload route', () => {
     assert.equal(body.title, 'POKEMON RED');
     assert.match(body.source, /Pokemon Red\.gb.*zip/);
 
-    const after = await bodyOf(await rom(new Request('https://example.test/api/rom')));
+    const after = await bodyOf(await romGet());
     assert.equal(after.present, true);
     assert.equal(after.size, 0x8000);
   });
@@ -119,8 +123,4 @@ describe('the upload route', () => {
     assert.equal((await rom(post(Buffer.alloc(0)))).status, 400);
   });
 
-  test('rejects methods other than GET and POST', async () => {
-    const response = await rom(new Request('https://example.test/api/rom', { method: 'DELETE' }));
-    assert.equal(response.status, 405);
-  });
 });

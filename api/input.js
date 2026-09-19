@@ -1757,9 +1757,9 @@ var ButtonPlanSchema = z2.object({
 });
 
 // src/harness/turn.ts
-function analyzeIfBattle(state, config2) {
+function analyzeIfBattle(state, config) {
   if (!state.battle) return null;
-  return analyzeBattle(state.battle, state.world.party, { fairPlay: config2.fairPlay });
+  return analyzeBattle(state.battle, state.world.party, { fairPlay: config.fairPlay });
 }
 
 // server/_lib/engine.ts
@@ -1786,10 +1786,10 @@ var FrameRecorder = class {
     return this.#frames;
   }
 };
-function describe(gb, journal, turns, config2) {
+function describe(gb, journal, turns, config) {
   const state = readGameState(gb);
   return {
-    state: buildStateEvent(state, analyzeIfBattle(state, config2)),
+    state: buildStateEvent(state, analyzeIfBattle(state, config)),
     journal: {
       goal: journal.goal,
       notes: journal.notes,
@@ -1996,9 +1996,7 @@ var Controller = class {
 };
 
 // server/input.ts
-var config = { maxDuration: 60 };
-async function handler(request) {
-  if (request.method !== "POST") return json({ error: "Use POST" }, 405);
+async function POST(request) {
   try {
     const sessionId = sessionIdFrom(request);
     const body = await readJson(request);
@@ -2023,6 +2021,5 @@ async function handler(request) {
   }
 }
 export {
-  config,
-  handler as default
+  POST
 };

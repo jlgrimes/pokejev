@@ -1776,8 +1776,8 @@ function createJevGateway() {
     "AI_GATEWAY_API_KEY is not set. Create a key at https://vercel.com/dashboard/ai-gateway and put it in .env (see .env.example)."
   );
 }
-function providerOptions(config2) {
-  return config2.fallbacks.length > 0 ? { gateway: { models: config2.fallbacks } } : void 0;
+function providerOptions(config) {
+  return config.fallbacks.length > 0 ? { gateway: { models: config.fallbacks } } : void 0;
 }
 
 // src/jev/prompts.ts
@@ -1914,22 +1914,22 @@ function fallbackBattleDecision(analysis) {
     noteToSelf: null
   };
 }
-async function decideBattleAction(config2, state, analysis, journal) {
-  if (config2.offline) {
+async function decideBattleAction(config, state, analysis, journal) {
+  if (config.offline) {
     return { decision: fallbackBattleDecision(analysis), usedFallback: true };
   }
-  const briefing = formatBattleBriefing(state, analysis, journal, { fairPlay: config2.fairPlay });
+  const briefing = formatBattleBriefing(state, analysis, journal, { fairPlay: config.fairPlay });
   const gateway = createJevGateway();
   try {
     const result = await generateObject({
-      model: gateway(config2.battleModel),
+      model: gateway(config.battleModel),
       schema: BattleDecisionSchema,
       system: JEV_IDENTITY,
       prompt: `${BATTLE_INSTRUCTIONS}
 
 ${briefing}`,
-      temperature: config2.temperature,
-      providerOptions: providerOptions(config2)
+      temperature: config.temperature,
+      providerOptions: providerOptions(config)
     });
     return { decision: sanitize(result.object, analysis), usedFallback: false };
   } catch (error) {
@@ -1987,8 +1987,8 @@ function fallbackButtonPlan(state, journal) {
     noteToSelf: null
   };
 }
-async function planOverworld(config2, state, journal, screenshot) {
-  if (config2.offline) {
+async function planOverworld(config, state, journal, screenshot) {
+  if (config.offline) {
     return { plan: fallbackButtonPlan(state, journal), usedFallback: true };
   }
   const briefing = formatOverworldBriefing(state, journal);
@@ -1996,19 +1996,19 @@ async function planOverworld(config2, state, journal, screenshot) {
   const text = `${OVERWORLD_INSTRUCTIONS}
 
 ${briefing}`;
-  const content = screenshot && config2.vision ? [
+  const content = screenshot && config.vision ? [
     { type: "text", text },
     { type: "text", text: "Here is the current screen as an image:" },
     { type: "image", image: screenshot }
   ] : [{ type: "text", text }];
   try {
     const result = await generateObject2({
-      model: gateway(config2.model),
+      model: gateway(config.model),
       schema: ButtonPlanSchema,
       system: JEV_IDENTITY,
       messages: [{ role: "user", content }],
-      temperature: config2.temperature,
-      providerOptions: providerOptions(config2)
+      temperature: config.temperature,
+      providerOptions: providerOptions(config)
     });
     return { plan: result.object, usedFallback: false };
   } catch (error) {
@@ -2018,12 +2018,12 @@ ${briefing}`;
 }
 
 // src/harness/turn.ts
-function analyzeIfBattle(state, config2) {
+function analyzeIfBattle(state, config) {
   if (!state.battle) return null;
-  return analyzeBattle(state.battle, state.world.party, { fairPlay: config2.fairPlay });
+  return analyzeBattle(state.battle, state.world.party, { fairPlay: config.fairPlay });
 }
 async function takeTurn(params) {
-  const { gb, controller, config: config2, journal, state, analysis } = params;
+  const { gb, controller, config, journal, state, analysis } = params;
   if (state.screen.awaitingInput && !state.ui.battleMenuOpen) {
     const presses = controller.advanceText(6);
     return {
@@ -2038,7 +2038,7 @@ async function takeTurn(params) {
   }
   if (state.battle && analysis) {
     if (state.ui.battleMenuOpen) {
-      return takeBattleTurn({ controller, config: config2, journal, state, analysis });
+      return takeBattleTurn({ controller, config, journal, state, analysis });
     }
     controller.waitFor((screen) => screen.awaitingInput || screen.flat.includes("FIGHT"), 180);
     return {
@@ -2051,12 +2051,12 @@ async function takeTurn(params) {
       latencyMs: 0
     };
   }
-  return takeOverworldTurn({ gb, controller, config: config2, journal, state });
+  return takeOverworldTurn({ gb, controller, config, journal, state });
 }
 async function takeBattleTurn(params) {
-  const { controller, config: config2, journal, state, analysis } = params;
+  const { controller, config, journal, state, analysis } = params;
   const started = Date.now();
-  const { decision, usedFallback } = await decideBattleAction(config2, state, analysis, journal);
+  const { decision, usedFallback } = await decideBattleAction(config, state, analysis, journal);
   const latencyMs = Date.now() - started;
   let detail = "";
   let executed = false;
@@ -2096,16 +2096,16 @@ async function takeBattleTurn(params) {
     reasoning: decision.reasoning,
     action: decision.action.toUpperCase(),
     detail,
-    model: config2.battleModel,
+    model: config.battleModel,
     usedFallback,
     latencyMs
   };
 }
 async function takeOverworldTurn(params) {
-  const { gb, controller, config: config2, journal, state } = params;
+  const { gb, controller, config, journal, state } = params;
   const started = Date.now();
-  const screenshot = config2.vision ? screenToPng(gb.screen(), 3) : void 0;
-  const { plan, usedFallback } = await planOverworld(config2, state, journal, screenshot);
+  const screenshot = config.vision ? screenToPng(gb.screen(), 3) : void 0;
+  const { plan, usedFallback } = await planOverworld(config, state, journal, screenshot);
   const latencyMs = Date.now() - started;
   for (const input of plan.inputs) {
     controller.press(input.button, input.repeat);
@@ -2119,7 +2119,7 @@ async function takeOverworldTurn(params) {
     reasoning: plan.observation,
     action: pressed,
     detail: plan.goal,
-    model: config2.model,
+    model: config.model,
     usedFallback,
     latencyMs
   };
@@ -2149,10 +2149,10 @@ var FrameRecorder = class {
     return this.#frames;
   }
 };
-function describe(gb, journal, turns, config2) {
+function describe(gb, journal, turns, config) {
   const state = readGameState(gb);
   return {
-    state: buildStateEvent(state, analyzeIfBattle(state, config2)),
+    state: buildStateEvent(state, analyzeIfBattle(state, config)),
     journal: {
       goal: journal.goal,
       notes: journal.notes,
@@ -2348,9 +2348,7 @@ var Controller = class {
 };
 
 // server/tick.ts
-var config = { maxDuration: 60 };
-async function handler(request) {
-  if (request.method !== "POST") return json({ error: "Use POST" }, 405);
+async function POST(request) {
   try {
     const sessionId = sessionIdFrom(request);
     const jevConfig = loadConfig({
@@ -2383,6 +2381,5 @@ async function handler(request) {
   }
 }
 export {
-  config,
-  handler as default
+  POST
 };

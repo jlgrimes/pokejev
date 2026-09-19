@@ -3,12 +3,8 @@ import { describe, FrameRecorder } from './_lib/engine.ts';
 import { json, fail, sessionIdFrom } from './_lib/http.ts';
 import { loadConfig } from '../src/jev/model.ts';
 
-export const config = { maxDuration: 60 };
-
 /** Throw the run away and boot a fresh game, wiping Jev's memory with it. */
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return json({ error: 'Use POST' }, 405);
-
+export async function POST(request: Request): Promise<Response> {
   try {
     const sessionId = sessionIdFrom(request);
     await deleteSession(sessionId);

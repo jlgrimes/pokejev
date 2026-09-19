@@ -4,8 +4,6 @@ import { json, fail } from './_lib/http.ts';
 import { listZipEntries, isZip } from './_lib/zip.ts';
 import { inspectRom } from '../src/game/rom.ts';
 
-export const config = { maxDuration: 60 };
-
 /** Generous enough for a zipped 1MB ROM, tight enough to reject nonsense. */
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
@@ -20,19 +18,18 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
  * Accepts a raw .gb body or a .zip (ROMs are nearly always distributed zipped,
  * and unzipping on a phone is exactly the kind of friction worth removing).
  */
-export default async function handler(request: Request): Promise<Response> {
-  const storage = getStorage();
-
-  if (request.method === 'GET') {
-    try {
-      const size = await storage.stat(ROM_KEY);
-      return json({ present: size !== null, size, key: ROM_KEY });
-    } catch (error) {
-      return fail(error);
-    }
+/** Whether a ROM is already installed, so the page knows what to show. */
+export async function GET(): Promise<Response> {
+  try {
+    const size = await getStorage().stat(ROM_KEY);
+    return json({ present: size !== null, size, key: ROM_KEY });
+  } catch (error) {
+    return fail(error);
   }
+}
 
-  if (request.method !== 'POST') return json({ error: 'Use POST' }, 405);
+export async function POST(request: Request): Promise<Response> {
+  const storage = getStorage();
 
   try {
     const body = Buffer.from(await request.arrayBuffer());

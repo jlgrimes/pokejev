@@ -170,19 +170,17 @@ function inspectRom(rom) {
 }
 
 // server/rom.ts
-var config = { maxDuration: 60 };
 var MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-async function handler(request) {
-  const storage = getStorage();
-  if (request.method === "GET") {
-    try {
-      const size = await storage.stat(ROM_KEY);
-      return json({ present: size !== null, size, key: ROM_KEY });
-    } catch (error) {
-      return fail(error);
-    }
+async function GET() {
+  try {
+    const size = await getStorage().stat(ROM_KEY);
+    return json({ present: size !== null, size, key: ROM_KEY });
+  } catch (error) {
+    return fail(error);
   }
-  if (request.method !== "POST") return json({ error: "Use POST" }, 405);
+}
+async function POST(request) {
+  const storage = getStorage();
   try {
     const body = Buffer.from(await request.arrayBuffer());
     if (body.length === 0) return json({ error: "No file was uploaded." }, 400);
@@ -227,6 +225,6 @@ function extractRom(body) {
   return { rom: candidate.read(), source: `${candidate.name} (from the zip)` };
 }
 export {
-  config,
-  handler as default
+  GET,
+  POST
 };

@@ -4,12 +4,8 @@ import { json, fail, readJson, sessionIdFrom } from './_lib/http.ts';
 import { Controller } from '../src/harness/controller.ts';
 import { loadConfig } from '../src/jev/model.ts';
 
-export const config = { maxDuration: 60 };
-
 /** Take over from Jev: press buttons yourself without spending a model call. */
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return json({ error: 'Use POST' }, 405);
-
+export async function POST(request: Request): Promise<Response> {
   try {
     const sessionId = sessionIdFrom(request);
     const body = await readJson<{ buttons?: unknown[]; button?: unknown }>(request);

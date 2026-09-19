@@ -6,8 +6,6 @@ import { takeTurn, analyzeIfBattle } from '../src/harness/turn.ts';
 import { readGameState } from '../src/game/state.ts';
 import { loadConfig } from '../src/jev/model.ts';
 
-export const config = { maxDuration: 60 };
-
 /**
  * Run exactly one Jev decision.
  *
@@ -16,9 +14,7 @@ export const config = { maxDuration: 60 };
  * the machine back. The browser calls this repeatedly to make Jev play, which
  * means nothing runs — and nothing costs anything — while nobody is watching.
  */
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return json({ error: 'Use POST' }, 405);
-
+export async function POST(request: Request): Promise<Response> {
   try {
     const sessionId = sessionIdFrom(request);
     const jevConfig = loadConfig({
