@@ -150,12 +150,19 @@ nor a ROM can be created for you:
    `BLOB_STORE_ID`; redeploy so the functions see it. Note there is no
    `BLOB_READ_WRITE_TOKEN` — deployed functions authenticate to Blob with their
    own OIDC token, the same way they authenticate to the AI Gateway.
-2. Upload your own ROM:
+2. Install your own ROM. **Easiest: just open the page** — when no ROM is
+   installed it shows a file picker. Choose your `.gb`, or the `.zip` it came
+   in, and it is unpacked, validated and stored for you. No CLI, no token, and
+   it works from a phone. The route sits behind the same Vercel Authentication
+   as the rest of the app, so only someone who can already open it can install
+   one.
+
+   From a machine with the CLI, equivalently:
 
 ```bash
 vercel link                      # pick the pokejev project
 vercel env pull .env             # fetch BLOB_STORE_ID + VERCEL_OIDC_TOKEN
-npm run upload-rom -- roms/pokemon_red.gb
+npm run upload-rom -- roms/pokemon_red.gb    # a .zip works here too
 ```
 
 Until both are done the page loads and tells you which one is missing.
@@ -176,6 +183,7 @@ token**, so no `AI_GATEWAY_API_KEY` needs to be copied into the project. Set
 | `POST /api/tick` | Run exactly one Jev decision, return the frames it produced |
 | `POST /api/input` | Press buttons yourself — no model call |
 | `POST /api/reset` | Throw the run away and start fresh |
+| `GET`/`POST /api/rom` | Check for, or install, the ROM (accepts `.gb` or `.zip`) |
 
 Add `?session=<name>` to any of them to run several independent games.
 

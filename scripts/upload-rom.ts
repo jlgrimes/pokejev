@@ -10,6 +10,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { put, head } from '@vercel/blob';
+import { inspectRom } from '../src/game/rom.ts';
+import { listZipEntries, isZip } from '../api/_lib/zip.ts';
 
 try {
   process.loadEnvFile('.env');
@@ -36,22 +38,31 @@ if (!hasCredentials) {
   process.exit(1);
 }
 
-const rom = readFileSync(path);
+const uploaded = readFileSync(path);
 
-// Sanity-check the cartridge header before uploading a megabyte of something else.
-const title = rom.subarray(0x134, 0x143).toString('ascii').replace(/\0+$/, '').trim();
-const hasNintendoLogo = rom[0x104] === 0xce && rom[0x105] === 0xed;
+// ROMs are usually distributed zipped, so unwrap one rather than making the
+// caller do it first.
+let rom = uploaded;
+let source = path;
+if (isZip(uploaded)) {
+  const entry = listZipEntries(uploaded).find((candidate) => /\.gbc?$/i.test(candidate.name));
+  if (!entry) {
+    console.error(`\n${path} is a zip with no .gb file inside.\n`);
+    process.exit(1);
+  }
+  rom = entry.read();
+  source = `${entry.name} (from ${path})`;
+}
 
-if (!hasNintendoLogo) {
-  console.error(`\n${path} does not look like a Game Boy ROM (no cartridge header).\n`);
+// Same validation the upload route applies, so both paths agree on what counts.
+const info = inspectRom(rom);
+for (const warning of info.warnings) console.warn(`Warning: ${warning}`);
+if (!info.valid) {
+  console.error(`\n${info.problems.join('\n')}\n`);
   process.exit(1);
 }
-if (!/POKEMON RED/i.test(title)) {
-  console.warn(`\nWarning: cartridge title is "${title}", expected "POKEMON RED".`);
-  console.warn('Jev\'s memory map is written for Pokemon Red (US) and will misread other games.\n');
-}
 
-console.log(`Uploading ${path} (${(rom.length / 1024 / 1024).toFixed(2)} MB, title "${title}") → ${key}`);
+console.log(`Uploading ${source} (${(rom.length / 1024 / 1024).toFixed(2)} MB, title "${info.title}") → ${key}`);
 
 const blob = await put(key, rom, {
   access: 'private',

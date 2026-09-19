@@ -1,5 +1,5 @@
-import { put, get, del } from '@vercel/blob';
-import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
+import { put, get, del, head } from '@vercel/blob';
+import { readFile, writeFile, mkdir, unlink, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 /**
@@ -13,6 +13,8 @@ export interface Storage {
   read(key: string): Promise<Buffer | null>;
   write(key: string, data: Buffer, contentType?: string): Promise<void>;
   remove(key: string): Promise<void>;
+  /** Size in bytes if the object exists, otherwise null. Avoids downloading it. */
+  stat(key: string): Promise<number | null>;
   kind: 'blob' | 'local';
 }
 
@@ -34,6 +36,11 @@ const localStorage: Storage = {
   },
   async remove(key) {
     await unlink(join(LOCAL_ROOT, key)).catch(() => {});
+  },
+  async stat(key) {
+    return await stat(join(LOCAL_ROOT, key))
+      .then((info) => info.size)
+      .catch(() => null);
   },
 };
 
@@ -61,6 +68,12 @@ const blobStorage: Storage = {
   },
   async remove(key) {
     await del(key).catch(() => {});
+  },
+  async stat(key) {
+    // head() fetches metadata only, so checking for a 1MB ROM costs nothing.
+    // It takes no access option: credentials already scope it to our store.
+    const info = await head(key).catch(() => null);
+    return info?.size ?? null;
   },
 };
 
