@@ -190,13 +190,31 @@ export function startViewer(
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
         connection: 'keep-alive',
+        // Stops reverse proxies buffering the stream until it is too late.
+        'x-accel-buffering': 'no',
       });
+
+      // Send something immediately. A response that opens and stays silent —
+      // which is exactly what happens before a ROM arrives, when nothing has
+      // been emitted yet — gets idle-timed-out by a proxy and shows up in the
+      // browser as a failed connection rather than an idle one.
+      res.write(': connected\n\n');
+
       // Replay the most recent state so the page is populated on load.
       for (const [type, payload] of latest) {
         res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
       }
+
+      // And keep it that way: comments are ignored by EventSource but reset
+      // every idle timer between here and the browser.
+      const heartbeat = setInterval(() => res.write(': ping\n\n'), 15_000);
+      heartbeat.unref?.();
+
       clients.add(res);
-      req.on('close', () => clients.delete(res));
+      req.on('close', () => {
+        clearInterval(heartbeat);
+        clients.delete(res);
+      });
       return;
     }
 

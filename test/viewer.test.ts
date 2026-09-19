@@ -99,6 +99,26 @@ describe('live viewer', () => {
     assert.equal((received.get('log') as { message: string }).message, 'hello from the harness');
   });
 
+  test('writes to the stream immediately, before anything has happened', async () => {
+    const events = new JevEvents();
+    const handle = await startViewer(events, stubControls().controls, 0);
+    handles.push(handle);
+
+    // Nothing has been emitted — the state a server sits in before it has a
+    // ROM. A response that opens and stays silent gets idle-timed-out by a
+    // proxy and surfaces in the browser as a failed connection.
+    const controller = new AbortController();
+    const response = await fetch(`${handle.url}/events`, { signal: controller.signal });
+    assert.equal(response.headers.get('x-accel-buffering'), 'no', 'proxies must not buffer it');
+
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    controller.abort();
+
+    assert.ok(first.value && first.value.length > 0, 'should send something on connect');
+    assert.match(new TextDecoder().decode(first.value), /^:/, 'an SSE comment keeps it alive');
+  });
+
   test('replays the latest state to a browser that joins late', async () => {
     const events = new JevEvents();
     const handle = await startViewer(events, stubControls().controls, 0);

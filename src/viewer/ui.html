@@ -333,9 +333,18 @@ drop.addEventListener('drop', (e) => uploadRom(e.dataTransfer?.files?.[0]));
 
 // Ask on load whether this server already has a cartridge in it.
 fetch('/rom')
-  .then((response) => (response.ok ? response.json() : null))
-  .then((status) => { if (status && !status.present) $('rom-panel').hidden = false; })
-  .catch(() => {});
+  .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
+  .then((status) => {
+    if (!status.present) {
+      $('rom-panel').hidden = false;
+      romStatus('No ROM on this server yet — choose one to start.');
+    }
+  })
+  .catch((error) => {
+    // Failing silently here left the page looking merely broken.
+    $('rom-panel').hidden = false;
+    romStatus(`Could not check for a ROM: ${error.message}`, 'err');
+  });
 
 const send = (body) => fetch('/control', {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
