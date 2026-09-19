@@ -1,0 +1,9 @@
+node_modules/
+out/
+*.log
+.env
+.env.local
+roms/*.gb
+roms/*.gbc
+saves/*.sav
+saves/*.state.json

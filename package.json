@@ -1,0 +1,30 @@
+{
+  "name": "pokejev",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jev, an LLM that plays Pokemon Red on a headless Game Boy — Vercel AI Gateway + TypeScript",
+  "type": "module",
+  "bin": { "jev": "./src/cli.ts" },
+  "scripts": {
+    "jev": "tsx src/cli.ts",
+    "play": "tsx src/cli.ts play",
+    "demo": "tsx src/cli.ts demo",
+    "doctor": "tsx src/cli.ts doctor",
+    "models": "tsx src/cli.ts models",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^4.0.87",
+    "ai": "^7.0.107",
+    "pngjs": "^7.0.0",
+    "serverboy": "^0.0.7",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pngjs": "^6.0.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
