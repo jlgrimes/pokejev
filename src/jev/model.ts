@@ -43,19 +43,27 @@ export function loadConfig(overrides: Partial<JevConfig> = {}): JevConfig {
   };
 }
 
-export function getApiKey(): string {
-  const key = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_AI_GATEWAY_KEY;
-  if (!key) {
-    throw new Error(
-      'AI_GATEWAY_API_KEY is not set. Create a key at https://vercel.com/dashboard/ai-gateway ' +
-        'and put it in .env (see .env.example).',
-    );
-  }
-  return key;
+export function getApiKey(): string | null {
+  return process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_AI_GATEWAY_KEY ?? null;
+}
+
+/** True when the gateway can authenticate without an explicit key. */
+export function hasVercelOidc(): boolean {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_OIDC_TOKEN);
 }
 
 export function createJevGateway() {
-  return createGateway({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  if (apiKey) return createGateway({ apiKey });
+
+  // Deployed on Vercel, the gateway authenticates with the deployment's own
+  // OIDC token, so no API key has to be copied into the project at all.
+  if (hasVercelOidc()) return createGateway({});
+
+  throw new Error(
+    'AI_GATEWAY_API_KEY is not set. Create a key at https://vercel.com/dashboard/ai-gateway ' +
+      'and put it in .env (see .env.example).',
+  );
 }
 
 /** Gateway provider options shared by every call, including model fallbacks. */

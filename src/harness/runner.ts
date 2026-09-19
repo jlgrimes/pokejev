@@ -2,14 +2,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { GameBoy, type Button } from '../emulator/gameboy.ts';
 import { Controller } from './controller.ts';
 import { readGameState, type GameState } from '../game/state.ts';
-import { analyzeBattle, type BattleAnalysis } from '../game/battle.ts';
-import { nonEmptyLines } from '../game/screen.ts';
-import { decideBattleAction } from '../jev/battle-agent.ts';
-import { planOverworld } from '../jev/overworld-agent.ts';
-import { screenToPng } from '../emulator/png.ts';
+import type { BattleAnalysis } from '../game/battle.ts';
+import { takeTurn, analyzeIfBattle } from './turn.ts';
 import type { JevConfig } from '../jev/model.ts';
-import { addNote, addRecent, saveJournal, type Journal } from '../jev/journal.ts';
-import { JevEvents, type DecisionEvent } from './events.ts';
+import { saveJournal, type Journal } from '../jev/journal.ts';
+import { JevEvents, buildStateEvent } from './events.ts';
 import { FramePump } from './frame-pump.ts';
 import type { ViewerControls } from '../viewer/server.ts';
 
@@ -117,131 +114,21 @@ export class JevRunner implements ViewerControls {
   // --- turn handling -----------------------------------------------------
 
   async #takeTurn(state: GameState, analysis: BattleAnalysis | null): Promise<void> {
-    // Text boxes and animations do not need a model call — just keep the game moving.
-    if (state.screen.awaitingInput && !state.ui.battleMenuOpen) {
-      const presses = this.#controller.advanceText(6);
-      this.#emitDecision({
-        kind: 'auto',
-        reasoning: 'A text box was waiting; advancing it does not need a decision.',
-        action: `press A x${presses || 1}`,
-        model: '(none)',
-        usedFallback: false,
-        latencyMs: 0,
-        turn: this.#turns,
-      });
-      return;
-    }
-
-    if (state.battle && analysis) {
-      if (state.ui.battleMenuOpen) {
-        await this.#takeBattleTurn(state, analysis);
-        return;
-      }
-      // Mid-battle animation or message: wait for the menu to come back.
-      this.#controller.waitFor((screen) => screen.awaitingInput || screen.flat.includes('FIGHT'), 180);
-      return;
-    }
-
-    await this.#takeOverworldTurn(state);
-  }
-
-  async #takeBattleTurn(state: GameState, analysis: BattleAnalysis): Promise<void> {
-    const started = Date.now();
-    const { decision, usedFallback } = await decideBattleAction(
-      this.#config, state, analysis, this.#journal,
-    );
-    const latencyMs = Date.now() - started;
-
-    let detail = '';
-    let executed = false;
-
-    if (decision.action === 'fight') {
-      const move = analysis.moves.find((m) => m.index === decision.moveIndex) ?? analysis.moves[0];
-      if (move) {
-        detail = `${move.name} (~${move.damage.typical} dmg, ${move.effectivenessLabel})`;
-        executed = this.#controller.useMove(move.name);
-        this.#journal.stats.movesChosen++;
-      }
-    } else if (decision.action === 'switch' && decision.partySlot !== null) {
-      const target = analysis.switchOptions.find((o) => o.slot === decision.partySlot);
-      if (target) {
-        detail = `switch to ${target.name}`;
-        executed = this.#controller.switchTo(target.name);
-      }
-    } else if (decision.action === 'item' && decision.item) {
-      detail = `use ${decision.item}`;
-      executed = this.#controller.useItem(decision.item);
-      if (executed && /BALL/i.test(decision.item)) this.#journal.stats.pokemonCaught++;
-    } else if (decision.action === 'run') {
-      detail = 'flee';
-      executed = this.#controller.run();
-    }
-
-    if (!executed && decision.action !== 'fight') {
-      // The menu path failed (item missing, switch refused); fall back to attacking.
-      const best = analysis.moves.find((m) => m.pp > 0);
-      if (best) {
-        detail += ` → fell back to ${best.name}`;
-        this.#controller.useMove(best.name);
-      }
-    }
-
-    this.#emitDecision({
-      kind: 'battle',
-      reasoning: decision.reasoning,
-      action: decision.action.toUpperCase(),
-      detail,
-      model: this.#config.battleModel,
-      usedFallback,
-      latencyMs,
-      turn: this.#turns,
+    const outcome = await takeTurn({
+      gb: this.#gb,
+      controller: this.#controller,
+      config: this.#config,
+      journal: this.#journal,
+      state,
+      analysis,
     });
-
-    addRecent(this.#journal, `battle: ${decision.action} ${detail}`);
-    if (decision.noteToSelf) addNote(this.#journal, decision.noteToSelf);
-
-    // Let the turn play out: our move, their move, any fainting.
-    this.#controller.advanceText(10);
-  }
-
-  async #takeOverworldTurn(state: GameState): Promise<void> {
-    const started = Date.now();
-    const screenshot = this.#config.vision
-      ? screenToPng(this.#gb.screen(), 3)
-      : undefined;
-
-    const { plan, usedFallback } = await planOverworld(
-      this.#config, state, this.#journal, screenshot,
-    );
-    const latencyMs = Date.now() - started;
-
-    for (const input of plan.inputs) {
-      this.#controller.press(input.button, input.repeat);
-    }
-
-    if (plan.goal && plan.goal !== this.#journal.goal) this.#journal.goal = plan.goal;
-    if (plan.noteToSelf) addNote(this.#journal, plan.noteToSelf);
-
-    const pressed = plan.inputs.map((i) => (i.repeat > 1 ? `${i.button}x${i.repeat}` : i.button)).join(' ');
-    addRecent(this.#journal, `${state.world.mapName}: ${pressed} (${plan.observation})`);
-
-    this.#emitDecision({
-      kind: 'overworld',
-      reasoning: plan.observation,
-      action: pressed,
-      detail: plan.goal,
-      model: this.#config.model,
-      usedFallback,
-      latencyMs,
-      turn: this.#turns,
-    });
+    this.events.emit('decision', { ...outcome, turn: this.#turns });
   }
 
   // --- plumbing ----------------------------------------------------------
 
   #analyze(state: GameState): BattleAnalysis | null {
-    if (!state.battle) return null;
-    return analyzeBattle(state.battle, state.world.party, { fairPlay: this.#config.fairPlay });
+    return analyzeIfBattle(state, this.#config);
   }
 
   #trackBattleTransitions(state: GameState): void {
@@ -275,39 +162,7 @@ export class JevRunner implements ViewerControls {
   }
 
   #emitState(state: GameState, analysis: BattleAnalysis | null): void {
-    this.events.emit('state', {
-      frame: state.frame,
-      mode: state.mode,
-      location: state.world.mapName,
-      position: { x: state.world.x, y: state.world.y },
-      money: state.world.money,
-      badges: state.world.badges,
-      party: state.world.party.map((mon) => ({
-        name: mon.nickname || mon.species,
-        species: mon.species,
-        level: mon.level,
-        hp: mon.hp,
-        maxHp: mon.maxHp,
-        hpPercent: mon.hpPercent,
-        status: mon.status,
-      })),
-      screen: nonEmptyLines(state.screen),
-      battle: state.battle
-        ? {
-            kind: state.battle.kind,
-            enemy: state.battle.enemy.species,
-            enemyLevel: state.battle.enemy.level,
-            enemyHpPercent: state.battle.enemy.hpPercent,
-            active: state.battle.player.nickname || state.battle.player.species,
-            activeHpPercent: state.battle.player.hpPercent,
-            analysis,
-          }
-        : null,
-    });
-  }
-
-  #emitDecision(decision: DecisionEvent): void {
-    this.events.emit('decision', decision);
+    this.events.emit('state', buildStateEvent(state, analysis));
   }
 
   #emitStatus(): void {

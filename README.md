@@ -120,6 +120,59 @@ two-axis navigation, because no single direction reaches the diagonal entry.
 Anything that needs no judgement — advancing text boxes, waiting out attack
 animations — is handled without a model call at all.
 
+## Deploying to Vercel
+
+Jev also runs as a Vercel app. The local harness is a long-lived process
+holding a Game Boy in memory, which serverless functions cannot be — so the
+deployment inverts it into a **tick** architecture:
+
+```
+POST /api/tick  →  load snapshot from Blob  →  read RAM  →  ask Jev  →
+                   press buttons  →  save snapshot  →  return frames + reasoning
+```
+
+The emulator snapshot is JSON-serialisable, and `saveState({ includeRom: false })`
+drops the ROM copy out of it (the ROM never changes), leaving ~200KB that gzips
+down small enough to move on every request. The browser drives the loop, so
+**nothing runs and nothing costs anything while nobody is watching**.
+
+### One-time setup
+
+```bash
+vercel link                      # pick the project
+vercel env pull .env             # fetch BLOB_READ_WRITE_TOKEN
+npm run upload-rom -- roms/pokemon_red.gb
+```
+
+The ROM goes into **private** Blob storage in your own account — not the repo,
+not the bundle, and not publicly readable. Only the deployed functions can
+fetch it. Until you upload one, the page shows a banner saying so.
+
+Deployments authenticate to the AI Gateway with the deployment's own **OIDC
+token**, so no `AI_GATEWAY_API_KEY` needs to be copied into the project. Set
+`JEV_MODEL` / `JEV_BATTLE_MODEL` as environment variables to choose the models.
+
+### Endpoints
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/state` | Current state without advancing (boots a new game on first call) |
+| `POST /api/tick` | Run exactly one Jev decision, return the frames it produced |
+| `POST /api/input` | Press buttons yourself — no model call |
+| `POST /api/reset` | Throw the run away and start fresh |
+
+Add `?session=<name>` to any of them to run several independent games.
+
+### Notes
+
+- Keep the deployment behind Vercel's Deployment Protection. The point is not
+  the code — it is that a public URL streaming Pokémon gameplay is legally
+  exposed.
+- Each tick is one model call plus a few hundred emulated frames, comfortably
+  inside the 60s function limit.
+- Ticks are not concurrency-safe: two browsers driving the same `session` will
+  fight over the snapshot. Use a different `session` per tab.
+
 ## Configuration
 
 Jev's brain is one env var. Any gateway model works, and battles can use a
@@ -150,14 +203,21 @@ src/
   emulator/   typed serverboy wrapper: frames, buttons, memory, save states, PNG
   game/       addresses, text codec, state reader, Gen 1 data, battle analysis
   jev/        gateway client, prompts, battle and overworld agents, journal
-  harness/    controller, play loop, frame pump, event bus
-  viewer/     SSE server and the browser UI
-test/         49 tests, including a hand-assembled ROM that tests the emulator
+  harness/    controller, play loop, shared turn logic, frame pump, event bus
+  viewer/     SSE server and the browser UI (local)
+api/          serverless routes for the Vercel deployment
+public/       the hosted viewer
+test/         60 tests, including a hand-assembled ROM that tests the emulator
 ```
+
+`src/harness/turn.ts` holds the one decision-and-execute step, shared by the
+local runner and the deployed `/api/tick`, so Jev plays identically in both.
 
 ## Testing
 
-`npm test` needs no ROM and no API key. `test/helpers/test-rom.ts` hand-assembles
+`npm test` needs no ROM and no API key — 60 tests, including the serverless
+routes, where each handler call stands in for a separate invocation to prove
+the run really does survive on nothing but persisted state. `test/helpers/test-rom.ts` hand-assembles
 a 32KB Game Boy ROM that writes to the tile map and mirrors the joypad into RAM,
 which lets the emulator, input and save-state paths be tested end to end without
 a copyrighted game. Battle logic is tested by planting exact situations in fake

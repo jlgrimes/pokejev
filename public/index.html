@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jev plays Pokémon Red</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171b21; --line: #252b34; --ink: #e6e9ee;
+    --dim: #8c96a3; --accent: #9bbc0f; --accent-dim: #6b8c1a;
+    --danger: #ff6b6b; --warn: #ffb86b; --good: #6bdc8f;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-size: 13px; line-height: 1.5;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  h1 { font-size: 15px; margin: 0; letter-spacing: 0.08em; text-transform: uppercase; }
+  h1 span { color: var(--accent); }
+  .pill {
+    padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--dim); font-size: 11px; white-space: nowrap;
+  }
+  .pill.live { color: var(--good); border-color: var(--good); }
+  .pill.paused { color: var(--warn); border-color: var(--warn); }
+  main {
+    display: grid; grid-template-columns: minmax(340px, 500px) 1fr;
+    gap: 16px; padding: 16px; align-items: start;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; margin-bottom: 16px;
+  }
+  .panel h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--dim); margin: 0 0 10px;
+  }
+  #screen {
+    width: 100%; aspect-ratio: 160 / 144; display: block; border-radius: 6px;
+    image-rendering: pixelated; background: #9bbc0f;
+  }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  button {
+    background: #20262e; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 12px;
+  }
+  button:hover { border-color: var(--accent-dim); color: var(--accent); }
+  .dpad { display: grid; grid-template-columns: repeat(3, 38px); gap: 4px; margin-top: 10px; }
+  .dpad button { padding: 6px 0; }
+  .dpad .spacer { visibility: hidden; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; color: var(--dim); font-size: 12px; }
+  .row b { color: var(--ink); font-weight: 600; }
+  .goal { color: var(--accent); margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; font-size: 11px; text-transform: uppercase; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.ko { color: var(--good); border-color: var(--good); }
+  .tag.super { color: var(--accent); border-color: var(--accent-dim); }
+  .tag.immune, .tag.nopp { color: var(--danger); border-color: var(--danger); }
+  .hpbar { height: 6px; border-radius: 3px; background: #2a323c; overflow: hidden; min-width: 70px; }
+  .hpbar i { display: block; height: 100%; background: var(--good); }
+  .hpbar i.mid { background: var(--warn); }
+  .hpbar i.low { background: var(--danger); }
+  .party { display: grid; gap: 8px; }
+  .party .mon { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+  .party .fainted { opacity: 0.45; }
+  #thoughts { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .thought { border-left: 2px solid var(--accent-dim); padding-left: 10px; }
+  .thought .meta { color: var(--dim); font-size: 11px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .thought .action { color: var(--accent); font-weight: 600; }
+  .thought.fallback { border-left-color: var(--warn); }
+  .thought.fallback .action { color: var(--warn); }
+  pre.screen-text {
+    margin: 0; color: var(--dim); font-size: 11px; line-height: 1.35;
+    white-space: pre-wrap; max-height: 150px; overflow-y: auto;
+  }
+  #log { max-height: 140px; overflow-y: auto; font-size: 11px; color: var(--dim); }
+  #log .error { color: var(--danger); }
+  #log .warn { color: var(--warn); }
+  .empty { color: var(--dim); font-style: italic; }
+  .banner {
+    padding: 10px 14px; border-radius: 8px; margin: 0 16px 0;
+    border: 1px solid var(--danger); color: var(--danger); background: #2a1a1a;
+  }
+  .banner code { color: var(--ink); }
+  button.primary { border-color: var(--accent-dim); color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .hint { color: var(--dim); font-size: 11px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Jev</span> plays Pokémon Red</h1>
+  <span class="pill" id="conn">loading…</span>
+  <span class="pill" id="turns">turn 0</span>
+  <span class="pill" id="where">—</span>
+  <span class="pill" id="model">—</span>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main>
+  <div>
+    <div class="panel">
+      <h2>Game Boy</h2>
+      <img id="screen" alt="Game Boy screen" />
+      <div class="controls">
+        <button id="play" class="primary">▶ Play</button>
+        <button id="step">Step once</button>
+        <button id="reset">Reset run</button>
+      </div>
+      <div class="controls">
+        <button data-btn="A">A</button>
+        <button data-btn="B">B</button>
+        <button data-btn="START">Start</button>
+        <button data-btn="SELECT">Select</button>
+      </div>
+      <div class="dpad">
+        <span class="spacer"></span><button data-btn="UP">↑</button><span class="spacer"></span>
+        <button data-btn="LEFT">←</button><span class="spacer"></span><button data-btn="RIGHT">→</button>
+        <span class="spacer"></span><button data-btn="DOWN">↓</button><span class="spacer"></span>
+      </div>
+      <div class="hint">
+        Jev only plays while this page is driving it — pause and nothing runs.
+        Arrow keys / Z / X / Enter take over manually.
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Status</h2>
+      <div class="row">
+        <span>money <b id="money">—</b></span>
+        <span>badges <b id="badges">none</b></span>
+        <span>pos <b id="pos">—</b></span>
+      </div>
+      <div class="goal" id="goal">—</div>
+    </div>
+
+    <div class="panel">
+      <h2>Party</h2>
+      <div class="party" id="party"><span class="empty">no Pokémon yet</span></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel" id="battle-panel" hidden>
+      <h2>Battle</h2>
+      <div class="row" id="battle-head"></div>
+      <table id="moves">
+        <thead>
+          <tr><th>Move</th><th>Type</th><th class="num">Dmg</th><th class="num">% HP</th><th class="num">PP</th><th>Read</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="row" id="threats" style="margin-top:10px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>What Jev is thinking</h2>
+      <div id="thoughts"><span class="empty">press Play to start a turn…</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Screen text</h2>
+      <pre class="screen-text" id="screen-text">—</pre>
+    </div>
+
+    <div class="panel">
+      <h2>Log</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const hpClass = (pct) => (pct > 50 ? '' : pct > 20 ? 'mid' : 'low');
+const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const session = new URLSearchParams(location.search).get('session') || 'default';
+const api = (path) => `/api/${path}?session=${encodeURIComponent(session)}`;
+
+/* ---- frame playback -------------------------------------------------------
+   A tick returns the whole animation it produced. We drain that queue at 30fps
+   while the next tick is already in flight, so playback stays continuous even
+   though the work arrives in bursts. */
+const queue = [];
+let playing = false;
+let busy = false;
+
+setInterval(() => {
+  // More than ~3s of backlog means we are behind; skip ahead rather than lag.
+  if (queue.length > 90) queue.splice(0, queue.length - 90);
+  const png = queue.shift();
+  if (png) $('screen').src = 'data:image/png;base64,' + png;
+}, 33);
+
+function enqueue(frames) {
+  if (Array.isArray(frames)) queue.push(...frames);
+}
+
+/* ---- rendering ---------------------------------------------------------- */
+function applyView(data) {
+  if (data.turns !== undefined) $('turns').textContent = 'turn ' + data.turns;
+  if (data.models) $('model').textContent = data.models.battle;
+  if (data.journal) $('goal').textContent = data.journal.goal || '—';
+
+  const s = data.state;
+  if (!s) return;
+  $('where').textContent = s.location;
+  $('money').textContent = '¥' + s.money;
+  $('badges').textContent = s.badges.length ? s.badges.join(', ') : 'none';
+  $('pos').textContent = s.position.x + ',' + s.position.y;
+  $('screen-text').textContent = s.screen.join('\n') || '(no text on screen)';
+
+  $('party').innerHTML = s.party.length
+    ? s.party.map((mon) => `
+        <div class="mon ${mon.hp === 0 ? 'fainted' : ''}">
+          <div>
+            <div>${esc(mon.name)} <span class="tag">L${mon.level}</span>
+              ${mon.status !== 'OK' ? `<span class="tag immune">${esc(mon.status)}</span>` : ''}</div>
+            <div class="hpbar"><i class="${hpClass(mon.hpPercent)}" style="width:${mon.hpPercent}%"></i></div>
+          </div>
+          <div class="num" style="color:var(--dim)">${mon.hp}/${mon.maxHp}</div>
+        </div>`).join('')
+    : '<span class="empty">no Pokémon yet</span>';
+
+  const panel = $('battle-panel');
+  if (!s.battle) { panel.hidden = true; return; }
+  panel.hidden = false;
+
+  $('battle-head').innerHTML = `
+    <span><b>${esc(s.battle.active)}</b> ${s.battle.activeHpPercent}%</span>
+    <span>vs</span>
+    <span><b>${esc(s.battle.enemy)}</b> L${s.battle.enemyLevel} · ${s.battle.enemyHpPercent}%</span>
+    <span class="tag">${esc(s.battle.kind)}</span>`;
+
+  const analysis = s.battle.analysis;
+  $('moves').querySelector('tbody').innerHTML = !analysis
+    ? '<tr><td colspan="6" class="empty">no analysis</td></tr>'
+    : analysis.moves.map((m) => {
+        const tags = [];
+        if (m.guaranteedKo) tags.push('<span class="tag ko">guaranteed KO</span>');
+        else if (m.possibleKo) tags.push('<span class="tag ko">can KO</span>');
+        if (m.effectiveness > 1) tags.push('<span class="tag super">super effective</span>');
+        if (m.effectiveness === 0) tags.push('<span class="tag immune">no effect</span>');
+        if (m.pp === 0) tags.push('<span class="tag nopp">no PP</span>');
+        return `<tr>
+          <td>${esc(m.name)}</td>
+          <td style="color:var(--dim)">${esc(m.type)}</td>
+          <td class="num">${m.damage.typical}</td>
+          <td class="num">${Math.round(m.damage.fractionOfTargetHp * 100)}%</td>
+          <td class="num">${m.pp}</td>
+          <td>${tags.join(' ')}</td>
+        </tr>`;
+      }).join('');
+
+  $('threats').innerHTML = analysis
+    ? `<span>speed: <b>${analysis.fasterSide === 'player' ? 'you move first' : analysis.fasterSide === 'enemy' ? 'opponent moves first' : 'tie'}</b></span>` +
+      (analysis.inKoRange ? '<span class="tag immune">in KO range</span>' : '') +
+      (analysis.incoming[0] ? `<span>biggest threat: <b>${esc(analysis.incoming[0].move)}</b> ~${analysis.incoming[0].damage.typical} dmg</span>` : '') +
+      (analysis.catchChance !== null ? `<span>catch chance: <b>${Math.round(analysis.catchChance * 100)}%</b></span>` : '')
+    : '';
+}
+
+function addThought(d) {
+  if (!d) return;
+  const list = $('thoughts');
+  if (list.querySelector('.empty')) list.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = 'thought' + (d.usedFallback ? ' fallback' : '');
+  el.innerHTML = `
+    <div class="meta">
+      <span>turn ${d.turn}</span><span>${esc(d.kind)}</span>
+      <span>${esc(d.model)}</span><span>${d.latencyMs}ms</span>
+      ${d.usedFallback ? '<span>fallback</span>' : ''}
+    </div>
+    <div class="action">${esc(d.action)}${d.detail ? ' — ' + esc(d.detail) : ''}</div>
+    <div>${esc(d.reasoning)}</div>`;
+  list.prepend(el);
+  while (list.children.length > 40) list.lastChild.remove();
+}
+
+function log(message, level = 'info') {
+  const div = document.createElement('div');
+  div.className = level;
+  div.textContent = new Date().toLocaleTimeString() + '  ' + message;
+  $('log').prepend(div);
+  while ($('log').children.length > 60) $('log').lastChild.remove();
+}
+
+function showBanner(html) {
+  $('banner').hidden = false;
+  $('banner').innerHTML = html;
+}
+
+/* ---- driving the run ---------------------------------------------------- */
+async function call(path, options) {
+  const response = await fetch(api(path), options);
+  const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+  if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+async function tickOnce() {
+  if (busy) return;
+  busy = true;
+  try {
+    const data = await call('tick', { method: 'POST' });
+    enqueue(data.frames);
+    applyView(data);
+    addThought(data.decision);
+    $('banner').hidden = true;
+  } catch (error) {
+    log(error.message, 'error');
+    setPlaying(false);
+    if (/No ROM found/i.test(error.message)) {
+      showBanner('No ROM in the Blob store. Upload your own dump with <code>npm run upload-rom -- path/to/rom.gb</code>, then reload.');
+    } else if (/AI_GATEWAY_API_KEY/i.test(error.message)) {
+      showBanner('The deployment has no <code>AI_GATEWAY_API_KEY</code>. Add it in Project Settings → Environment Variables and redeploy.');
+    } else {
+      showBanner(esc(error.message));
+    }
+  } finally {
+    busy = false;
+  }
+}
+
+function setPlaying(next) {
+  playing = next;
+  $('play').textContent = playing ? '❚❚ Pause' : '▶ Play';
+  $('conn').textContent = playing ? 'playing' : 'paused';
+  $('conn').className = 'pill ' + (playing ? 'live' : 'paused');
+  $('step').disabled = playing;
+}
+
+async function loop() {
+  while (playing) {
+    await tickOnce();
+    // Let the animation drain before asking for more, so the picture keeps
+    // moving instead of jumping ahead of what you can see.
+    while (playing && queue.length > 45) await sleep(120);
+  }
+}
+
+$('play').onclick = () => {
+  setPlaying(!playing);
+  if (playing) loop();
+};
+$('step').onclick = () => tickOnce();
+$('reset').onclick = async () => {
+  if (!confirm('Throw away this run and start a new game? Jev forgets everything.')) return;
+  setPlaying(false);
+  try {
+    const data = await call('reset', { method: 'POST' });
+    queue.length = 0;
+    enqueue(data.frames);
+    applyView(data);
+    $('thoughts').innerHTML = '<span class="empty">fresh run — press Play</span>';
+    log('Started a fresh run');
+  } catch (error) {
+    log(error.message, 'error');
+  }
+};
+
+async function press(button) {
+  try {
+    const data = await call('input', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ button }),
+    });
+    enqueue(data.frames);
+    applyView(data);
+  } catch (error) {
+    log(error.message, 'error');
+  }
+}
+
+for (const button of document.querySelectorAll('[data-btn]')) {
+  button.onclick = () => press(button.dataset.btn);
+}
+document.addEventListener('keydown', (event) => {
+  const keys = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT',
+                 z: 'A', x: 'B', Enter: 'START', Shift: 'SELECT' };
+  const button = keys[event.key];
+  if (button) { event.preventDefault(); press(button); }
+  if (event.key === ' ') { event.preventDefault(); $('play').click(); }
+});
+
+/* ---- boot --------------------------------------------------------------- */
+(async () => {
+  try {
+    const data = await call('state');
+    enqueue(data.frames);
+    applyView(data);
+    setPlaying(false);
+    log(data.isNew ? 'Booted a fresh game — press Play' : `Resumed at turn ${data.turns}`);
+  } catch (error) {
+    $('conn').textContent = 'error';
+    log(error.message, 'error');
+    showBanner(
+      /No ROM found/i.test(error.message)
+        ? 'No ROM in the Blob store. Upload your own dump with <code>npm run upload-rom -- path/to/rom.gb</code>, then reload.'
+        : esc(error.message),
+    );
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,14 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { createRequire } from 'node:module';
 
-const require = createRequire(import.meta.url);
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const Gameboy = require('serverboy') as any;
-const saveStateModule = require('serverboy/src/gameboy_core/saveState.js') as {
-  saveState: () => unknown[];
-  returnFromState: (state: unknown[]) => void;
-};
+// Static imports rather than createRequire: bundlers (including the one Vercel
+// runs over serverless functions) can only see dependencies they can analyse.
+import Gameboy from 'serverboy';
+import saveStateModule from 'serverboy/src/gameboy_core/saveState.js';
 
 export const BUTTONS = ['RIGHT', 'LEFT', 'UP', 'DOWN', 'A', 'B', 'SELECT', 'START'] as const;
 export type Button = (typeof BUTTONS)[number];
@@ -23,8 +19,16 @@ export interface PressOptions {
   release?: number;
 }
 
-/** Opaque emulator snapshot; JSON-serialisable so it can be written to disk. */
-export type SaveState = { frames: number; state: unknown[] };
+/**
+ * Opaque emulator snapshot; JSON-serialisable so it can be written to disk or
+ * sent to object storage.
+ *
+ * `state[0]` is a copy of the whole ROM. That is dead weight for persistence —
+ * the ROM never changes — so `saveState({ includeRom: false })` nulls it out
+ * and `loadState` splices the loaded ROM back in. For Pokemon Red that is the
+ * difference between a multi-megabyte snapshot and a couple of hundred KB.
+ */
+export type SaveState = { frames: number; state: unknown[]; romStripped?: boolean };
 
 /**
  * Typed, frame-stepped wrapper around serverboy.
@@ -37,6 +41,7 @@ export class GameBoy {
   #gb: any;
   #core: any;
   #frames = 0;
+  #rom: Uint8Array | null = null;
 
   /** Called after every emulated frame. Used to stream video to the viewer. */
   onFrame: ((gb: GameBoy) => void) | null = null;
@@ -47,6 +52,7 @@ export class GameBoy {
 
   /** Load a ROM buffer, optionally restoring battery-backed save data. */
   loadRom(rom: Buffer | Uint8Array, saveData?: number[]): void {
+    this.#rom = Uint8Array.from(rom);
     this.#gb.loadRom(rom, saveData);
     // serverboy hides the emulator core behind a run-time-generated key. We need
     // it for save states, which the public interface does not expose.
@@ -147,14 +153,24 @@ export class GameBoy {
    * Full emulator snapshot (CPU, RAM, VRAM, timers) — not the in-game save.
    * Useful for rewinding a bad decision or for replaying a battle.
    */
-  saveState(): SaveState {
+  saveState(options: { includeRom?: boolean } = {}): SaveState {
     if (!this.#core) throw new Error('No ROM loaded; cannot save state.');
-    return { frames: this.#frames, state: saveStateModule.saveState.call(this.#core) };
+    const state = saveStateModule.saveState.call(this.#core);
+    if (options.includeRom === false) {
+      state[0] = null;
+      return { frames: this.#frames, state, romStripped: true };
+    }
+    return { frames: this.#frames, state };
   }
 
   loadState(snapshot: SaveState): void {
     if (!this.#core) throw new Error('No ROM loaded; cannot restore state.');
-    saveStateModule.returnFromState.call(this.#core, snapshot.state);
+    const state = snapshot.state.slice();
+    if (state[0] === null || state[0] === undefined) {
+      if (!this.#rom) throw new Error('Snapshot has no ROM and none is loaded.');
+      state[0] = Array.from(this.#rom);
+    }
+    saveStateModule.returnFromState.call(this.#core, state);
     this.#frames = snapshot.frames;
   }
 

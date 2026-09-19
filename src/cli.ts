@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { GameBoy } from './emulator/gameboy.ts';
 import { readGameState } from './game/state.ts';
 import { analyzeBattle } from './game/battle.ts';
-import { loadConfig, listModels, DEFAULT_MODEL, DEFAULT_BATTLE_MODEL } from './jev/model.ts';
+import { loadConfig, listModels, hasVercelOidc, DEFAULT_MODEL, DEFAULT_BATTLE_MODEL } from './jev/model.ts';
 import { loadJournal, emptyJournal, saveJournal } from './jev/journal.ts';
 import { JevRunner } from './harness/runner.ts';
 import { JevEvents } from './harness/events.ts';
@@ -98,7 +98,11 @@ async function commandDoctor(): Promise<void> {
   checks.push(['ROM', romFound, romFound ? ROM_PATH : `missing: ${ROM_PATH}`]);
 
   const hasKey = Boolean(process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_AI_GATEWAY_KEY);
-  checks.push(['AI_GATEWAY_API_KEY', hasKey, hasKey ? 'set' : 'not set — see .env.example']);
+  checks.push([
+    'Gateway credentials',
+    hasKey || hasVercelOidc(),
+    hasKey ? 'AI_GATEWAY_API_KEY set' : hasVercelOidc() ? 'using Vercel OIDC' : 'not set — see .env.example',
+  ]);
 
   let gatewayOk = false;
   let gatewayNote = '';

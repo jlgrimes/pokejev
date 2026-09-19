@@ -15,5 +15,13 @@ declare module 'serverboy' {
     KEYMAP: Record<string, number>;
   }
   const Gameboy: GameboyConstructor;
-  export = Gameboy;
+  export default Gameboy;
+}
+
+declare module 'serverboy/src/gameboy_core/saveState.js' {
+  const saveStateModule: {
+    saveState: (this: unknown) => unknown[];
+    returnFromState: (this: unknown, state: unknown[]) => void;
+  };
+  export default saveStateModule;
 }
