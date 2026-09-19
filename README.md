@@ -136,13 +136,27 @@ drops the ROM copy out of it (the ROM never changes), leaving ~200KB that gzips
 down small enough to move on every request. The browser drives the loop, so
 **nothing runs and nothing costs anything while nobody is watching**.
 
+The live deployment is **https://pokejev-qrtz.vercel.app** (qrtz team), behind
+Vercel Authentication — you have to be signed in to Vercel with access to the
+team to reach it.
+
 ### One-time setup
 
+Two steps are needed before Jev can actually play, because neither a Blob store
+nor a ROM can be created for you:
+
+1. In the Vercel dashboard: **Storage → Create Database → Blob**, and connect it
+   to the `pokejev` project. That injects `BLOB_READ_WRITE_TOKEN`. Redeploy so
+   the functions pick it up.
+2. Upload your own ROM:
+
 ```bash
-vercel link                      # pick the project
+vercel link                      # pick the pokejev project
 vercel env pull .env             # fetch BLOB_READ_WRITE_TOKEN
 npm run upload-rom -- roms/pokemon_red.gb
 ```
+
+Until both are done the page loads and tells you which one is missing.
 
 The ROM goes into **private** Blob storage in your own account — not the repo,
 not the bundle, and not publicly readable. Only the deployed functions can
@@ -165,8 +179,9 @@ Add `?session=<name>` to any of them to run several independent games.
 
 ### Notes
 
-- Keep the deployment behind Vercel's Deployment Protection. The point is not
-  the code — it is that a public URL streaming Pokémon gameplay is legally
+- The project uses **Vercel Authentication** for every deployment (password
+  protection needs a Pro plan). Keep some form of protection on: the point is
+  not the code — it is that a public URL streaming Pokémon gameplay is legally
   exposed.
 - Each tick is one model call plus a few hundred emulated frames, comfortably
   inside the 60s function limit.
