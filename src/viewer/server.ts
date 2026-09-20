@@ -60,10 +60,24 @@ function tokensMatch(expected: string, supplied: string | undefined): boolean {
 }
 
 function cookieValue(header: string | undefined, name: string): string | undefined {
-  return header
-    ?.split(';')
-    .map((part) => part.trim().split('='))
-    .find(([key]) => key === name)?.[1];
+  // Only the first '=' separates the name and value. Base64 keys commonly
+  // end in '=' padding, which must survive the sign-in cookie round trip.
+  for (const part of header?.split(';') ?? []) {
+    const cookie = part.trim();
+    const separator = cookie.indexOf('=');
+    if (separator !== -1 && cookie.slice(0, separator) === name) {
+      return cookie.slice(separator + 1);
+    }
+  }
+  return undefined;
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 /**
@@ -78,17 +92,10 @@ function suppliedKeys(rawUrl: string, cookieHeader: string | undefined): string[
   const candidates: string[] = [];
   const raw = /[?&]key=([^&]*)/.exec(rawUrl)?.[1];
   if (raw !== undefined) {
-    const safeDecode = (value: string) => {
-      try {
-        return decodeURIComponent(value);
-      } catch {
-        return value;
-      }
-    };
     candidates.push(safeDecode(raw), safeDecode(raw.replace(/\+/g, ' ')), raw);
   }
   const cookie = cookieValue(cookieHeader, COOKIE_NAME);
-  if (cookie) candidates.push(cookie, decodeURIComponent(cookie));
+  if (cookie) candidates.push(cookie, safeDecode(cookie));
   return candidates;
 }
 
@@ -163,6 +170,11 @@ export function startViewer(
     if (token) {
       const candidates = suppliedKeys(req.url ?? '', req.headers.cookie);
       if (!candidates.some((candidate) => tokensMatch(token, candidate))) {
+        if (url.pathname !== '/') {
+          res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          res.end(JSON.stringify({ error: 'Access key missing or rejected. Sign in again, then retry.' }));
+          return;
+        }
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
         res.end(
           keyPrompt(
@@ -175,7 +187,7 @@ export function startViewer(
       }
       // Remember it, so the SSE stream and control posts do not each need the key.
       if (/[?&]key=/.test(req.url ?? '')) {
-        res.setHeader('set-cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+        res.setHeader('set-cookie', `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
       }
     }
 

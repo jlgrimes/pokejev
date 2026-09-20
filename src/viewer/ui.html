@@ -110,6 +110,11 @@
 
 <main>
   <div>
+    <div class="panel" id="auth-panel" hidden role="alert">
+      <h2>Sign in again</h2>
+      <p>Your access key is missing or was rejected.</p>
+      <a href="/" style="color:var(--accent)">Enter your access key</a>
+    </div>
     <div class="panel" id="rom-panel" hidden>
       <h2>Install a ROM</h2>
       <div class="drop" id="drop">
@@ -305,6 +310,13 @@ source.addEventListener('log', (e) => {
  * status and a snippet instead.
  */
 async function readJsonOrExplain(response) {
+  if (response.status === 401) {
+    source.close();
+    $('conn').textContent = 'sign-in required';
+    $('conn').className = 'pill';
+    $('auth-panel').hidden = false;
+    throw new Error('Access key missing or rejected. Sign in again, then retry.');
+  }
   const text = await response.text();
   if (!text) throw new Error(`HTTP ${response.status} with an empty response`);
   try {
@@ -356,7 +368,7 @@ drop.addEventListener('drop', (e) => uploadRom(e.dataTransfer?.files?.[0]));
 
 // Ask on load whether this server already has a cartridge in it.
 fetch('/rom')
-  .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
+  .then(readJsonOrExplain)
   .then((status) => {
     if (!status.present) {
       $('rom-panel').hidden = false;
@@ -371,6 +383,11 @@ fetch('/rom')
 
 const send = (body) => fetch('/control', {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+}).then(readJsonOrExplain).catch((error) => {
+  const entry = document.createElement('div');
+  entry.className = 'error';
+  entry.textContent = error.message;
+  $('log').prepend(entry);
 });
 
 $('pause').onclick = () => send({ command: paused ? 'resume' : 'pause' });

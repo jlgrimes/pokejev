@@ -162,6 +162,82 @@ describe('live viewer', () => {
     assert.match(html, /JEV_ACCESS_TOKEN/, 'should say where to find the key');
   });
 
+  for (const token of ['ab+cd/ef==', 'ab=cd/ef+gh', 'literal%key=']) {
+    test(`keeps cookie authentication working after sign-in (${token})`, async () => {
+      const stub = stubControls();
+      const uploads: Buffer[] = [];
+      const handle = await startViewer(new JevEvents(), stub.controls, 0, {
+        token,
+        rom: {
+          status: async () => ({ present: false, size: null }),
+          install: async (data) => {
+            uploads.push(data);
+            return { title: 'TEST', size: data.length, source: 'uploaded file' };
+          },
+        },
+      });
+      handles.push(handle);
+
+      const login = await fetch(`${handle.url}/?key=${encodeURIComponent(token)}`);
+      assert.equal(login.status, 200);
+      const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+      await login.text();
+      // The browser no longer sends the query key for any of these requests.
+      const headers = { cookie: `other=value; ${cookie}; another=value` };
+      const status = await fetch(`${handle.url}/rom`, { headers });
+      assert.equal(status.status, 200);
+      assert.deepEqual(await status.json(), { present: false, size: null });
+
+      const upload = await fetch(`${handle.url}/rom`, { method: 'POST', headers, body: 'ROM bytes' });
+      assert.equal(upload.status, 200);
+      await upload.text();
+      assert.equal(uploads[0]?.toString(), 'ROM bytes');
+
+      const control = await fetch(`${handle.url}/control`, {
+        method: 'POST', headers, body: JSON.stringify({ command: 'pause' }),
+      });
+      assert.equal(control.status, 200);
+      await control.text();
+      assert.deepEqual(stub.calls, ['pause']);
+
+      const abort = new AbortController();
+      try {
+        const stream = await fetch(`${handle.url}/events`, { headers, signal: abort.signal });
+        assert.equal(stream.status, 200);
+        assert.match(stream.headers.get('content-type')!, /text\/event-stream/);
+        const first = await stream.body!.getReader().read();
+        assert.match(new TextDecoder().decode(first.value), /: connected/);
+      } finally {
+        abort.abort();
+      }
+
+      // Cookies issued before this fix must keep working after a redeploy.
+      const legacy = await fetch(`${handle.url}/rom`, { headers: { cookie: `jev_key=${token}` } });
+      assert.equal(legacy.status, 200);
+      await legacy.text();
+    });
+  }
+
+  test('rejects invalid cookies and unauthenticated API calls without invoking controls', async () => {
+    const stub = stubControls();
+    const handle = await startViewer(new JevEvents(), stub.controls, 0, { token: 'private==' });
+    handles.push(handle);
+    for (const cookie of ['', 'jev_key=wrong', 'jev_key=private', 'jev_key=%broken']) {
+      for (const path of ['/rom', '/events', '/control']) {
+        const response = await fetch(`${handle.url}${path}`, {
+          method: path === '/events' ? 'GET' : 'POST',
+          headers: { cookie },
+          ...(path === '/events' ? {} : { body: JSON.stringify({ command: 'pause' }) }),
+        });
+        assert.equal(response.status, 401);
+        assert.match(response.headers.get('content-type')!, /application\/json/);
+        assert.match((await response.json() as { error: string }).error, /sign in/i);
+      }
+    }
+    assert.deepEqual(stub.calls, []);
+    assert.equal((await fetch(`${handle.url}/healthz`)).status, 200);
+  });
+
   test('control buttons reach the runner', async () => {
     const events = new JevEvents();
     const stub = stubControls();
