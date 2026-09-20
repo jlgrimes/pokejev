@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { StuckState } from '../harness/stuck.ts';
+import { emptyWorld, type WorldMemory } from '../game/world-map.ts';
 
 /**
  * Jev's memory between turns.
@@ -19,6 +20,11 @@ export interface Journal {
    * path, where every request builds a fresh emulator.
    */
   stuck?: StuckState;
+  /**
+   * Where Jev has walked and what it bumped into. Memory in the truest sense:
+   * without it every turn re-discovers the same fence.
+   */
+  world?: WorldMemory;
   stats: {
     turns: number;
     battlesEntered: number;
@@ -35,6 +41,7 @@ export function emptyJournal(): Journal {
   return {
     goal: 'Get out of the house, meet PROF.OAK, and pick a starter Pokemon.',
     notes: [],
+    world: emptyWorld(),
     recent: [],
     stats: { turns: 0, battlesEntered: 0, battlesWon: 0, movesChosen: 0, pokemonCaught: 0 },
   };

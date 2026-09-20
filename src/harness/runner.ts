@@ -195,7 +195,7 @@ export class JevRunner implements ViewerControls {
   }
 
   #emitState(state: GameState, analysis: BattleAnalysis | null): void {
-    this.events.emit('state', buildStateEvent(state, analysis));
+    this.events.emit('state', buildStateEvent(state, analysis, this.#journal.world));
   }
 
   #emitStatus(): void {

@@ -16,12 +16,17 @@ import { loadConfig } from '../src/jev/model.ts';
  * each one has exactly one right answer and the harness knows it without
  * asking a model, because the whole bug was a model being asked and failing.
  */
-function screen(lines: [row: number, col: number, text: string][], playerName = '') {
+function board(lines: [row: number, col: number, text: string][], playerName = '') {
   const gb = new FakeGameBoy();
   gb.fillScreen();
   for (const [row, col, text] of lines) gb.writeScreenText(row, col, text);
   if (playerName) gb.writeBytes(ADDR.wPlayerName, encodeString(playerName, ADDR.NICK_SIZE));
-  return readGameState(gb.asGameBoy());
+  return gb;
+}
+
+/** A frozen game: nothing a button does changes anything the harness can see. */
+function screen(lines: [row: number, col: number, text: string][], playerName = '') {
+  return readGameState(board(lines, playerName).asGameBoy());
 }
 
 describe('getting into the game without asking anyone', () => {
@@ -139,10 +144,11 @@ describe('the play loop refuses to burn turns on the title screen', () => {
     };
   }
 
-  async function turnOn(state: ReturnType<typeof screen>, journal: Journal) {
+  async function turnOn(gb: FakeGameBoy, journal: Journal) {
+    const state = readGameState(gb.asGameBoy());
     const { pressed, controller } = recordingController();
     const outcome = await takeTurn({
-      gb: {} as never,
+      gb: gb.asGameBoy(),
       controller: controller as never,
       // A real model would be a network call; nothing below should reach one.
       config: loadConfig({ mode: 'evaluate', offline: false }),
@@ -154,7 +160,7 @@ describe('the play loop refuses to burn turns on the title screen', () => {
   }
 
   test('the title screen presses START without paying for a decision', async () => {
-    const { outcome, pressed } = await turnOn(screen([]), emptyJournal());
+    const { outcome, pressed } = await turnOn(board([]), emptyJournal());
 
     assert.equal(outcome.kind, 'intro');
     assert.deepEqual(pressed, ['START']);
@@ -166,7 +172,7 @@ describe('the play loop refuses to burn turns on the title screen', () => {
     const journal = emptyJournal();
     // A named player standing in a screen that never changes: past the intro,
     // so without the shake this is the overworld agent answering forever.
-    const frozen = screen([[3, 3, 'NOTHING EVER CHANGES']], 'RED');
+    const frozen = board([[3, 3, 'NOTHING EVER CHANGES']], 'RED');
 
     const kinds: string[] = [];
     const buttons: string[] = [];
@@ -201,7 +207,7 @@ describe('an intro that never ends', () => {
       } as never,
       config: loadConfig({ mode: 'evaluate', offline: false }),
       journal,
-      state: screen([]),
+      state: readGameState(board([]).asGameBoy()),
       analysis: null,
     });
 

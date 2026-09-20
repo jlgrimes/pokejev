@@ -1,14 +1,9 @@
-import {
-  experimental_evaluate as evaluate,
-  Experimental_EvaluationUnsupportedQuestionTypeError as UnsupportedQuestionType,
-} from 'ai';
+import { experimental_evaluate as evaluate } from 'ai';
 import type { GameState } from '../game/state.ts';
 import type { BattleAnalysis } from '../game/battle.ts';
 import { nonEmptyLines } from '../game/screen.ts';
-import { BUTTONS, type Button } from '../emulator/gameboy.ts';
 import { createJevGateway, providerOptions, type JevConfig } from './model.ts';
 import { fallbackBattleDecision, type BattleDecision } from './battle-agent.ts';
-import { fallbackButtonPlan, type ButtonPlan } from './overworld-agent.ts';
 import { addNote, type Journal } from './journal.ts';
 import { stuckWarning } from '../harness/stuck.ts';
 
@@ -25,6 +20,9 @@ import { stuckWarning } from '../harness/stuck.ts';
  * The trade-off is that there is no reasoning to display, so the explanation
  * shown in the viewer is reconstructed from the option it picked and how
  * confident it was.
+ *
+ * Walking around is decided in `navigate-agent.ts`, over destinations rather
+ * than buttons; the same principle, applied to a different question.
  */
 
 const GEN1_NOTES = [
@@ -275,122 +273,6 @@ function toBattleDecision(
   }
   // The option set is ours, so an unknown answer means something changed.
   return { ...fallbackBattleDecision(analysis), reasoning: `${reasoning} (unrecognised option "${choice}")` };
-}
-
-// --- overworld -------------------------------------------------------------
-
-const BUTTON_MEANINGS: Record<Button, string> = {
-  UP: 'Walk or face north. In a menu, move the cursor up.',
-  DOWN: 'Walk or face south. In a menu, move the cursor down.',
-  LEFT: 'Walk or face west. In a menu, move the cursor left.',
-  RIGHT: 'Walk or face east. In a menu, move the cursor right.',
-  A: 'Confirm, talk, read a sign, or advance a text box.',
-  B: 'Cancel, or back out of a menu you did not want.',
-  START: 'Open the main menu.',
-  SELECT: 'Rarely useful; only for reordering items.',
-};
-
-const REPEAT_LEVELS = [1, 2, 4, 8];
-
-function overworldState(state: GameState, journal: Journal) {
-  const warning = stuckWarning(journal.stuck?.turns ?? 0);
-  return {
-    ...(warning ? { warning } : {}),
-    situation: 'Walking around in Pokemon Red',
-    yourGoal: journal.goal,
-    location: state.world.mapName,
-    position: { x: state.world.x, y: state.world.y },
-    badges: state.world.badges,
-    money: state.world.money,
-    party: state.world.party.map((mon) => ({
-      name: mon.nickname || mon.species,
-      level: mon.level,
-      hpPercent: mon.hpPercent,
-      status: mon.status,
-    })),
-    screenText: nonEmptyLines(state.screen),
-    aTextBoxIsWaiting: state.screen.awaitingInput,
-    notesToSelf: journal.notes,
-    whatYouJustDid: journal.recent,
-    hint: 'The first press toward a new direction only turns you; walking there needs another.',
-  };
-}
-
-export async function planOverworldByEvaluation(
-  config: JevConfig,
-  state: GameState,
-  journal: Journal,
-  deps: EvaluateDeps = {},
-): Promise<{ plan: ButtonPlan; usedFallback: boolean; considered?: Consideration[] }> {
-  const criteria = Object.fromEntries(
-    BUTTONS.map((button) => [button, BUTTON_MEANINGS[button]]),
-  ) as Record<string, string>;
-
-  const shared = overworldState(state, journal);
-  const buttonQuestion = {
-    type: 'choice' as const,
-    instructions:
-      'You are Jev, playing Pokemon Red. Choose the next button to press, working towards ' +
-      'your goal. If a text box is waiting, press A. If you are stuck in a menu you did not ' +
-      'want, press B. If you seem to be repeating yourself, try a different direction.',
-    criteria,
-  };
-
-  try {
-    let answers: { button: { choice: string; probabilities?: Record<string, number> }; repeat?: { score: number } };
-    try {
-      const result = await evaluate({
-        model: resolveModel(deps, config.model),
-        state: shared,
-        questions: {
-          button: buttonQuestion,
-          repeat: {
-            type: 'score' as const,
-            instructions:
-              'How many times in a row should that button be pressed before looking at the ' +
-              'screen again? Prefer fewer when anything uncertain is about to happen.',
-            criteria: ['once', 'twice', 'four times', 'eight times'],
-          },
-        },
-        ...(providerOptions(config) ? { providerOptions: providerOptions(config) } : {}),
-      });
-      answers = result.answers as typeof answers;
-    } catch (error) {
-      // Not every evaluation model answers score questions; the button alone is enough.
-      if (!UnsupportedQuestionType.isInstance(error)) throw error;
-      const result = await evaluate({
-        model: resolveModel(deps, config.model),
-        state: shared,
-        questions: { button: buttonQuestion },
-        ...(providerOptions(config) ? { providerOptions: providerOptions(config) } : {}),
-      });
-      answers = result.answers as typeof answers;
-    }
-
-    const button = (BUTTONS as readonly string[]).includes(answers.button.choice)
-      ? (answers.button.choice as Button)
-      : 'A';
-    const level = Math.max(0, Math.min(REPEAT_LEVELS.length - 1, Math.round(answers.repeat?.score ?? 0)));
-
-    return {
-      plan: {
-        observation: explain(answers.button.choice, (key) => key, answers.button.probabilities),
-        goal: journal.goal, // an evaluation model returns no prose to restate it with
-        inputs: [{ button, repeat: REPEAT_LEVELS[level]! }],
-        noteToSelf: null,
-      },
-      usedFallback: false,
-      considered: weigh(
-        answers.button.choice,
-        BUTTONS as readonly string[] as string[],
-        (key) => key,
-        answers.button.probabilities,
-      ),
-    };
-  } catch (error) {
-    console.error(`[jev] overworld evaluation failed, falling back: ${(error as Error).message}`);
-    return { plan: fallbackButtonPlan(state, journal), usedFallback: true };
-  }
 }
 
 /** Kept so the journal still records something when evaluation is in use. */

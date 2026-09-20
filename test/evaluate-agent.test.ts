@@ -179,63 +179,6 @@ describe('battles as an evaluation', () => {
   });
 });
 
-describe('the overworld as an evaluation', () => {
-  function overworldFixture() {
-    const gb = new FakeGameBoy();
-    gb.fillScreen();
-    gb.writeByte(ADDR.wCurMap, 0x00);
-    gb.writeByte(ADDR.wXCoord, 5);
-    gb.writeByte(ADDR.wYCoord, 6);
-    gb.writeScreenText(12, 1, 'HELLO THERE');
-    return readGameState(gb.asGameBoy());
-  }
-
-  test('asks which button, with every button as an option', async () => {
-    const { agent, calls, deps } = await withFakeModel(() => ({
-      button: { type: 'choice', choice: 'UP' },
-      repeat: { type: 'score', score: 1 },
-    }));
-
-    const { plan } = await agent.planOverworldByEvaluation(config(), overworldFixture(), emptyJournal(), deps);
-
-    const criteria = calls[0]!.questions.button.criteria as Record<string, string>;
-    assert.deepEqual(Object.keys(criteria).sort(), ['A', 'B', 'DOWN', 'LEFT', 'RIGHT', 'SELECT', 'START', 'UP']);
-    assert.equal(plan.inputs[0]!.button, 'UP');
-    assert.equal(plan.inputs[0]!.repeat, 2, 'score level 1 means twice');
-  });
-
-  test('retries without the score question when the model rejects it', async () => {
-    const { Experimental_EvaluationUnsupportedQuestionTypeError: Unsupported } = await import('ai');
-    let attempt = 0;
-    const { agent, calls, deps } = await withFakeModel(() => {
-      attempt++;
-      if (attempt === 1) {
-        throw new Unsupported({ questionType: 'score', modelId: 'typesafe-ai/jev' } as never);
-      }
-      return { button: { type: 'choice', choice: 'A' } };
-    });
-
-    const { plan, usedFallback } = await agent.planOverworldByEvaluation(config(), overworldFixture(), emptyJournal(), deps);
-
-    assert.equal(usedFallback, false, 'a rejected score question is not a failure');
-    assert.equal(calls.length, 2);
-    assert.deepEqual(Object.keys(calls[1]!.questions), ['button']);
-    assert.equal(plan.inputs[0]!.button, 'A');
-    assert.equal(plan.inputs[0]!.repeat, 1);
-  });
-
-  test('a button that does not exist never reaches the controller', async () => {
-    const { agent, deps } = await withFakeModel(() => ({
-      button: { type: 'choice', choice: 'TURBO' },
-    }));
-    const { plan, usedFallback } = await agent.planOverworldByEvaluation(
-      config(), overworldFixture(), emptyJournal(), deps,
-    );
-    // Rejected by the SDK before we see it, so the turn falls back safely.
-    assert.equal(usedFallback, true);
-    assert.ok(['A', 'DOWN'].includes(plan.inputs[0]!.button));
-  });
-});
 
 describe('what the viewer gets to watch', () => {
   /** Spread the remaining probability over whatever the agent offered. */
@@ -310,35 +253,4 @@ describe('what the viewer gets to watch', () => {
     assert.equal(result.considered, undefined);
   });
 
-  test('walking around is weighed the same way', async () => {
-    const gb = new FakeGameBoy();
-    gb.fillScreen();
-    gb.writeByte(ADDR.wCurMap, 0x00);
-    const state = readGameState(gb.asGameBoy());
-
-    const { agent, deps } = await withFakeModel((captured) => {
-      const keys = Object.keys(captured.questions.button.criteria);
-      const spare = (1 - 0.65) / (keys.length - 1);
-      return {
-        button: {
-          type: 'choice',
-          choice: 'UP',
-          probabilities: Object.fromEntries(
-            keys.map((key) => [key, key === 'UP' ? 0.65 : spare]),
-          ),
-        },
-        repeat: { type: 'score', score: 0 },
-      };
-    });
-
-    const { considered } = await agent.planOverworldByEvaluation(
-      config(), state, emptyJournal(), deps,
-    );
-
-    assert.ok(considered);
-    assert.equal(considered.length, 8, 'one bar per Game Boy button');
-    assert.equal(considered[0]!.label, 'UP');
-    assert.equal(considered[0]!.chosen, true);
-    assert.ok(Math.abs(considered[0]!.probability! - 0.65) < 1e-9);
-  });
 });

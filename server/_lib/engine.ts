@@ -72,18 +72,19 @@ export class FrameRecorder {
 
 export interface TickView {
   state: StateEvent;
-  journal: { goal: string; notes: string[]; stats: Record<string, number> };
+  journal: { goal: string; notes: string[]; stats: Record<string, number>; stuckFor: number };
   turns: number;
 }
 
 export function describe(gb: GameBoy, journal: Journal, turns: number, config: JevConfig): TickView {
   const state = readGameState(gb);
   return {
-    state: buildStateEvent(state, analyzeIfBattle(state, config)),
+    state: buildStateEvent(state, analyzeIfBattle(state, config), journal.world),
     journal: {
       goal: journal.goal,
       notes: journal.notes,
       stats: journal.stats as unknown as Record<string, number>,
+      stuckFor: journal.stuck?.turns ?? 0,
     },
     turns,
   };

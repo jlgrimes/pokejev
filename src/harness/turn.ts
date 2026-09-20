@@ -1,17 +1,15 @@
 import type { GameBoy } from '../emulator/gameboy.ts';
 import type { Controller } from './controller.ts';
-import type { GameState } from '../game/state.ts';
+import { readGameState, type GameState } from '../game/state.ts';
 import { analyzeBattle, type BattleAnalysis } from '../game/battle.ts';
 import { decideBattleAction } from '../jev/battle-agent.ts';
-import { planOverworld } from '../jev/overworld-agent.ts';
-import {
-  decideBattleByEvaluation,
-  planOverworldByEvaluation,
-  type Consideration,
-} from '../jev/evaluate-agent.ts';
+import { chooseDestination } from '../jev/navigate-agent.ts';
+import { describeDestination } from '../jev/destination.ts';
+import { followRoute } from './navigator.ts';
+import { emptyWorld, type WorldMemory } from '../game/world-map.ts';
+import { decideBattleByEvaluation, type Consideration } from '../jev/evaluate-agent.ts';
 import { detectIntroPhase, introInputs, describeIntroPhase } from '../game/intro.ts';
 import { trackStuck, shakeButton, SHAKE_AFTER, INTRO_PATIENCE } from './stuck.ts';
-import { screenToPng } from '../emulator/png.ts';
 import type { JevConfig } from '../jev/model.ts';
 import { addNote, addRecent, type Journal } from '../jev/journal.ts';
 
@@ -55,6 +53,9 @@ export async function takeTurn(params: {
   analysis: BattleAnalysis | null;
 }): Promise<TurnOutcome> {
   const { gb, controller, config, journal, state, analysis } = params;
+  // The map of where Jev has walked lives in the journal, so it is persisted
+  // and restored by exactly the same machinery as everything else it knows.
+  const world = (journal.world ??= emptyWorld());
 
   // Has anything actually happened since last turn? Everything below needs to
   // know, and a turn that is never asked cannot notice it is going nowhere.
@@ -141,7 +142,7 @@ export async function takeTurn(params: {
     };
   }
 
-  return takeOverworldTurn({ gb, controller, config, journal, state, stuckFor });
+  return takeOverworldTurn({ gb, controller, config, journal, state, world, stuckFor });
 }
 
 async function takeBattleTurn(params: {
@@ -220,43 +221,50 @@ async function takeOverworldTurn(params: {
   config: JevConfig;
   journal: Journal;
   state: GameState;
+  world: WorldMemory;
   stuckFor: number;
 }): Promise<TurnOutcome> {
-  const { gb, controller, config, journal, state, stuckFor } = params;
+  const { gb, controller, config, journal, state, world, stuckFor } = params;
   const started = Date.now();
-  // An evaluation model takes structured state, not pictures, so the
-  // screenshot is only built for the generative path that can use it.
-  const { plan, usedFallback, considered } =
-    config.mode === 'evaluate' && !config.offline
-      ? await planOverworldByEvaluation(config, state, journal)
-      : {
-          ...(await planOverworld(
-            config,
-            state,
-            journal,
-            config.vision ? screenToPng(gb.screen(), 3) : undefined,
-          )),
-          considered: undefined,
-        };
+
+  // Jev picks a place, not a button. Every option carries a route that was
+  // planned over ground we have walked, so "into the fence" is not on offer.
+  const { option, reasoning, usedFallback, considered } =
+    await chooseDestination(config, state, world, journal);
   const latencyMs = Date.now() - started;
 
-  for (const input of plan.inputs) {
-    controller.press(input.button, input.repeat);
+  const destination = option.destination;
+  let action = describeDestination(destination);
+  let detail = journal.goal;
+
+  if (destination.kind === 'interact') {
+    controller.press('A');
+  } else if (destination.kind === 'menu') {
+    controller.press('START');
+  } else if (destination.kind === 'back') {
+    controller.press('B');
+  } else {
+    const report = followRoute(gb, controller, world, destination.route);
+    detail = `${report.taken}/${report.planned} steps`;
+    if (report.changedMap) {
+      const now = readGameState(gb);
+      detail += ` → ${now.world.mapName}`;
+      addNote(journal, `${state.world.mapName} (${destination.x},${destination.y}) leads to ${now.world.mapName}`);
+    } else if (report.blockedAt) {
+      // The one press it takes to learn this is the whole point: the tile is
+      // now a wall in the map, so nothing will route through it again.
+      detail += ` → blocked going ${report.blockedAt}, remembered`;
+      action += ' (hit a wall)';
+    }
   }
 
-  if (plan.goal && plan.goal !== journal.goal) journal.goal = plan.goal;
-  if (plan.noteToSelf) addNote(journal, plan.noteToSelf);
-
-  const pressed = plan.inputs
-    .map((input) => (input.repeat > 1 ? `${input.button}x${input.repeat}` : input.button))
-    .join(' ');
-  addRecent(journal, `${state.world.mapName}: ${pressed} (${plan.observation})`);
+  addRecent(journal, `${state.world.mapName}: ${action} — ${detail}`);
 
   return {
     kind: 'overworld',
-    reasoning: plan.observation,
-    action: pressed,
-    detail: plan.goal,
+    reasoning,
+    action,
+    detail,
     model: config.model,
     usedFallback,
     latencyMs,

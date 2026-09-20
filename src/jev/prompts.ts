@@ -1,7 +1,6 @@
 import type { GameState } from '../game/state.ts';
 import type { BattleAnalysis } from '../game/battle.ts';
 import type { Journal } from './journal.ts';
-import { stuckWarning } from '../harness/stuck.ts';
 import { nonEmptyLines } from '../game/screen.ts';
 import { BATTLE_ITEMS } from '../game/data/items.ts';
 
@@ -104,29 +103,4 @@ YOUR CURRENT GOAL: ${journal.goal}
 
 SCREEN:
 ${nonEmptyLines(state.screen).map((line) => `  | ${line}`).join('\n')}`;
-}
-
-/** The overworld briefing: where we are, what's on screen, what we were doing. */
-export function formatOverworldBriefing(state: GameState, journal: Journal): string {
-  const warning = stuckWarning(journal.stuck?.turns ?? 0);
-  return `OVERWORLD
-${warning ? `\n!! ${warning}\n` : ''}
-LOCATION: ${state.world.mapName} (map id ${state.world.map}) at tile x=${state.world.x}, y=${state.world.y}
-PLAYER: ${state.world.playerName || '(unnamed)'} | money ¥${state.world.money} | badges: ${state.world.badges.join(', ') || 'none'}
-
-${formatParty(state)}
-
-BAG: ${state.world.bag.map((b) => `${b.item} x${b.count}`).join(', ') || '(empty)'}
-
-SCREEN (exact text read from the tile map; ▶ is the menu cursor, ▼ means a text box is waiting):
-${nonEmptyLines(state.screen).map((line) => `  | ${line}`).join('\n') || '  (no text on screen)'}
-${state.menu.maxItem > 0 ? `\nMENU: cursor is on entry ${state.menu.cursorIndex} of 0..${state.menu.maxItem}` : ''}
-
-YOUR CURRENT GOAL: ${journal.goal}
-
-NOTES YOU HAVE WRITTEN DOWN:
-${journal.notes.length ? journal.notes.map((n) => `  - ${n}`).join('\n') : '  (none yet)'}
-
-WHAT YOU JUST DID:
-${journal.recent.length ? journal.recent.map((r) => `  - ${r}`).join('\n') : '  (nothing yet)'}`;
 }

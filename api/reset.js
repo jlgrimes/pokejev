@@ -6,7 +6,6 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Gameboy from "serverboy";
 import saveStateModule from "serverboy/src/gameboy_core/saveState.js";
-var BUTTONS = ["RIGHT", "LEFT", "UP", "DOWN", "A", "B", "SELECT", "START"];
 var SCREEN_WIDTH = 160;
 var SCREEN_HEIGHT = 144;
 var GameBoy = class _GameBoy {
@@ -231,11 +230,25 @@ async function loadRom() {
   return cached;
 }
 
+// src/game/world-map.ts
+function emptyWorld() {
+  return { maps: {} };
+}
+function exitsOf(world, map) {
+  const known = world.maps[map];
+  if (!known) return [];
+  return Object.entries(known.exits).map(([at, to]) => {
+    const [x, y] = at.split(",").map(Number);
+    return { x, y, ...to };
+  });
+}
+
 // src/jev/journal.ts
 function emptyJournal() {
   return {
     goal: "Get out of the house, meet PROF.OAK, and pick a starter Pokemon.",
     notes: [],
+    world: emptyWorld(),
     recent: [],
     stats: { turns: 0, battlesEntered: 0, battlesWon: 0, movesChosen: 0, pokemonCaught: 0 }
   };
@@ -1514,7 +1527,7 @@ function readGameState(gb) {
 }
 
 // src/harness/events.ts
-function buildStateEvent(state, analysis) {
+function buildStateEvent(state, analysis, world) {
   return {
     frame: state.frame,
     mode: state.mode,
@@ -1532,6 +1545,7 @@ function buildStateEvent(state, analysis) {
       status: mon.status
     })),
     screen: nonEmptyLines(state.screen),
+    map: buildMapView(state, world),
     battle: state.battle ? {
       kind: state.battle.kind,
       enemy: state.battle.enemy.species,
@@ -1541,6 +1555,18 @@ function buildStateEvent(state, analysis) {
       activeHpPercent: state.battle.player.hpPercent,
       analysis
     } : null
+  };
+}
+function buildMapView(state, world) {
+  const known = world?.maps[state.world.map];
+  if (!known) return null;
+  const split = (want) => Object.entries(known.tiles).filter(([, terrain]) => terrain === want).map(([at]) => at.split(",").map(Number));
+  return {
+    name: state.world.mapName,
+    at: { x: state.world.x, y: state.world.y },
+    open: split("open"),
+    walls: split("wall"),
+    exits: exitsOf(world, state.world.map).map((exit) => ({ x: exit.x, y: exit.y, to: exit.toName }))
   };
 }
 
@@ -1748,26 +1774,13 @@ var BattleDecisionSchema = z.object({
   noteToSelf: z.string().nullable().describe("Something worth remembering for later in the run, or null.")
 });
 
-// src/jev/overworld-agent.ts
+// src/jev/navigate-agent.ts
+import { experimental_evaluate as evaluate } from "ai";
 import { generateObject as generateObject2 } from "ai";
 import { z as z2 } from "zod";
-var ButtonPlanSchema = z2.object({
-  observation: z2.string().describe("What is happening on screen right now, in one sentence."),
-  goal: z2.string().describe("The objective you are working towards. Keep the previous goal unless it is done."),
-  inputs: z2.array(
-    z2.object({
-      button: z2.enum(BUTTONS),
-      repeat: z2.number().int().min(1).max(12).describe("How many times to press it (e.g. walking several tiles).")
-    })
-  ).min(1).max(6).describe("The button presses to perform now. Keep it short \u2014 you will see the result and can continue."),
-  noteToSelf: z2.string().nullable().describe("A durable fact worth remembering (a location, a blocked path, an NPC), or null.")
-});
 
 // src/jev/evaluate-agent.ts
-import {
-  experimental_evaluate as evaluate,
-  Experimental_EvaluationUnsupportedQuestionTypeError as UnsupportedQuestionType
-} from "ai";
+import { experimental_evaluate as evaluate2 } from "ai";
 
 // src/harness/turn.ts
 function analyzeIfBattle(state, config) {
@@ -1814,11 +1827,12 @@ var FrameRecorder = class {
 function describe(gb, journal, turns, config) {
   const state = readGameState(gb);
   return {
-    state: buildStateEvent(state, analyzeIfBattle(state, config)),
+    state: buildStateEvent(state, analyzeIfBattle(state, config), journal.world),
     journal: {
       goal: journal.goal,
       notes: journal.notes,
-      stats: journal.stats
+      stats: journal.stats,
+      stuckFor: journal.stuck?.turns ?? 0
     },
     turns
   };

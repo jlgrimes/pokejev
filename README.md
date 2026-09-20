@@ -25,6 +25,8 @@ and presses the buttons itself — and you can watch it play in your browser.
 - the Game Boy screen, streamed at 30fps
 - a **stuck** badge in the header the moment the game stops moving — a climbing
   turn counter is not progress, and nothing else tells them apart
+- **where Jev has been** — a fog-of-war map of the current area: ground it has
+  walked, walls it has bumped into, doors it has found, and where it is standing
 - **how Jev is weighing it** — a live bar per option it was offered, showing the
   probability it gave each one and which it took. In evaluation mode this is
   not a paraphrase of a decision, it *is* the decision: a 51/49 call looks
@@ -61,6 +63,38 @@ told it is repeating itself, ten and the harness stops asking and starts trying
 buttons. And because a wrong intro detector would press START at a title screen
 forever — opening and closing the menu, so the screen keeps *changing* — the
 opening itself is capped at 200 turns.
+
+## Walking around
+
+Jev is never asked which button to press. It is asked **where to go**.
+
+Asking for a button makes "into the fence" a legal answer, so it keeps being
+given — the failure every published attempt at this game runs into. Claude
+Plays Pokemon shipped a pathfinding tool and the write-ups still report it
+"attempt[ing] to walk into walls all the time"; the tool was optional and
+largely went unused. Gemini's harness fed the model a fog-of-war tile map built
+from emulator memory rather than pixels, plus a pathfinder, because
+vision-language models are unreliable at fine-grained spatial reasoning over a
+grid. The reinforcement-learning work rewards *reaching new tiles and new maps*
+rather than pressing buttons at all.
+
+This harness takes the same idea with one difference that matters: the option
+set is not a tool Jev may decline to use, it is the whole question.
+
+- **Walkability is learned by walking.** Press a direction, re-read the
+  coordinates. Moved → that tile is open. Did not move twice in a row → it is a
+  wall, written to the map. (Twice, because Gen 1 spends the first press turning
+  to face a new direction, and calling that a wall would brick every corner.)
+- **Options are destinations with routes.** Unexplored ground on each compass
+  bearing, known exits and where they led, plus press A / menu / back. Each
+  carries a BFS route planned over ground actually walked, so a wall is not
+  merely ranked low — it is not on the menu.
+- **Untried ground is assumed passable.** Otherwise the first step on a new map
+  would be impossible. A wrong guess costs one bumped step and is remembered.
+- **The map lives in the journal**, so it persists across restarts and works the
+  same on the serverless path.
+- **With no model at all**, Jev heads for the nearest unexplored tile. Unlike a
+  button guess this cannot loop: the tile stops being unexplored once reached.
 
 ## Setup
 

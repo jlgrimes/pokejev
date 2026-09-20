@@ -78,6 +78,12 @@
   .thought.intro .action { color: var(--dim); }
   .thought.stuck { border-left-color: var(--danger); }
   .thought.stuck .action { color: var(--danger); }
+  /* Fog-of-war map: what Jev has walked, and what it bumped into. */
+  #map-panel .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--dim); margin-top: 8px; }
+  #map-panel .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  #map { width: 100%; height: auto; display: block; image-rendering: pixelated; border-radius: 6px; background: #12161c; }
+  #map-head { color: var(--dim); font-size: 11px; margin-bottom: 8px; }
+  #map-head b { color: var(--ink); }
   /* How Jev weighed its options: the distribution it actually decided from. */
   .odds { display: grid; gap: 5px; }
   .odds .opt {
@@ -207,6 +213,18 @@
       <div class="row" id="threats" style="margin-top:10px"></div>
     </div>
 
+    <div class="panel" id="map-panel" hidden>
+      <h2>Where Jev has been</h2>
+      <div id="map-head"></div>
+      <canvas id="map" width="240" height="240"></canvas>
+      <div class="legend">
+        <span><i style="background:#3b4654"></i>walked</span>
+        <span><i style="background:#7a3340"></i>wall</span>
+        <span><i style="background:#9bbc0f"></i>Jev</span>
+        <span><i style="background:#d8a13a"></i>exit</span>
+      </div>
+    </div>
+
     <div class="panel" id="odds-panel" hidden>
       <h2>How Jev is weighing it</h2>
       <div id="odds-head"></div>
@@ -281,6 +299,7 @@ source.addEventListener('state', (e) => {
   $('badges').textContent = s.badges.length ? s.badges.join(', ') : 'none';
   $('pos').textContent = s.position.x + ',' + s.position.y;
   $('screen-text').textContent = s.screen.join('\n') || '(no text on screen)';
+  drawMap(s.map);
 
   $('party').innerHTML = s.party.length
     ? s.party.map((mon) => `
@@ -331,6 +350,47 @@ source.addEventListener('state', (e) => {
       (analysis.catchChance !== null ? `<span>catch chance: <b>${Math.round(analysis.catchChance * 100)}%</b></span>` : '')
     : '';
 });
+
+/**
+ * Draw the fog of war.
+ *
+ * Jev navigates by this map, so watching it fill in is watching it learn. A
+ * red tile is a wall it walked into once — and, crucially, will never be
+ * offered as a destination again.
+ */
+function drawMap(map) {
+  const panel = $('map-panel');
+  if (!map || (!map.open.length && !map.walls.length)) { panel.hidden = true; return; }
+  panel.hidden = false;
+
+  const points = [...map.open, ...map.walls, [map.at.x, map.at.y]];
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const minX = Math.min(...xs) - 1, maxX = Math.max(...xs) + 1;
+  const minY = Math.min(...ys) - 1, maxY = Math.max(...ys) + 1;
+  const cols = maxX - minX + 1, rows = maxY - minY + 1;
+
+  const canvas = $('map');
+  const cell = Math.max(3, Math.min(14, Math.floor(480 / Math.max(cols, rows))));
+  canvas.width = cols * cell;
+  canvas.height = rows * cell;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#12161c';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const put = (x, y, color) => {
+    ctx.fillStyle = color;
+    ctx.fillRect((x - minX) * cell, (y - minY) * cell, cell - 1, cell - 1);
+  };
+  for (const [x, y] of map.open) put(x, y, '#3b4654');
+  for (const [x, y] of map.walls) put(x, y, '#7a3340');
+  for (const exit of map.exits) put(exit.x, exit.y, '#d8a13a');
+  put(map.at.x, map.at.y, '#9bbc0f');
+
+  $('map-head').innerHTML =
+    `<b>${esc(map.name)}</b> · ${map.open.length} walked · ${map.walls.length} walls` +
+    (map.exits.length ? ` · ${map.exits.length} exit${map.exits.length === 1 ? '' : 's'}` : '');
+}
 
 /**
  * Render a decision's probability distribution.

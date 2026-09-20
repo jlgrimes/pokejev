@@ -6,7 +6,6 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Gameboy from "serverboy";
 import saveStateModule from "serverboy/src/gameboy_core/saveState.js";
-var BUTTONS = ["RIGHT", "LEFT", "UP", "DOWN", "A", "B", "SELECT", "START"];
 var SCREEN_WIDTH = 160;
 var SCREEN_HEIGHT = 144;
 var GameBoy = class _GameBoy {
@@ -146,30 +145,30 @@ import { dirname as dirname2, join } from "node:path";
 var localRoot = () => process.env.LOCAL_STORAGE_DIR ?? ".data";
 var localStorage = {
   kind: "local",
-  async read(key) {
+  async read(key2) {
     try {
-      return await readFile(join(localRoot(), key));
+      return await readFile(join(localRoot(), key2));
     } catch {
       return null;
     }
   },
-  async write(key, data) {
-    const path = join(localRoot(), key);
+  async write(key2, data) {
+    const path = join(localRoot(), key2);
     await mkdir(dirname2(path), { recursive: true });
     await writeFile(path, data);
   },
-  async remove(key) {
-    await unlink(join(localRoot(), key)).catch(() => {
+  async remove(key2) {
+    await unlink(join(localRoot(), key2)).catch(() => {
     });
   },
-  async stat(key) {
-    return await stat(join(localRoot(), key)).then((info) => info.size).catch(() => null);
+  async stat(key2) {
+    return await stat(join(localRoot(), key2)).then((info) => info.size).catch(() => null);
   }
 };
 var blobStorage = {
   kind: "blob",
-  async read(key) {
-    const result = await get(key, { access: "private", useCache: false }).catch(() => null);
+  async read(key2) {
+    const result = await get(key2, { access: "private", useCache: false }).catch(() => null);
     if (!result || result.statusCode !== 200 || !result.stream) return null;
     const chunks = [];
     for await (const chunk of result.stream) {
@@ -177,8 +176,8 @@ var blobStorage = {
     }
     return Buffer.concat(chunks);
   },
-  async write(key, data, contentType = "application/octet-stream") {
-    await put(key, data, {
+  async write(key2, data, contentType = "application/octet-stream") {
+    await put(key2, data, {
       access: "private",
       addRandomSuffix: false,
       allowOverwrite: true,
@@ -186,12 +185,12 @@ var blobStorage = {
       cacheControlMaxAge: 0
     });
   },
-  async remove(key) {
-    await del(key).catch(() => {
+  async remove(key2) {
+    await del(key2).catch(() => {
     });
   },
-  async stat(key) {
-    const info = await head(key).catch(() => null);
+  async stat(key2) {
+    const info = await head(key2).catch(() => null);
     return info?.size ?? null;
   }
 };
@@ -231,6 +230,152 @@ async function loadRom() {
   return cached;
 }
 
+// src/game/world-map.ts
+var MAX_TILES_PER_MAP = 4e3;
+var STEPS = [
+  // y grows southward in Pokemon's coordinates, so UP is -1.
+  { button: "UP", dx: 0, dy: -1 },
+  { button: "DOWN", dx: 0, dy: 1 },
+  { button: "LEFT", dx: -1, dy: 0 },
+  { button: "RIGHT", dx: 1, dy: 0 }
+];
+function emptyWorld() {
+  return { maps: {} };
+}
+var key = (x, y) => `${x},${y}`;
+function mapFor(world, map, name) {
+  const existing = world.maps[map];
+  if (existing) return existing;
+  const fresh = { name, tiles: {}, exits: {} };
+  world.maps[map] = fresh;
+  return fresh;
+}
+function terrainAt(world, map, x, y) {
+  return world.maps[map]?.tiles[key(x, y)];
+}
+function mark(world, map, name, x, y, terrain) {
+  const known = mapFor(world, map, name);
+  if (terrain === "wall" && known.tiles[key(x, y)] === "open") return;
+  if (!(key(x, y) in known.tiles) && Object.keys(known.tiles).length >= MAX_TILES_PER_MAP) return;
+  known.tiles[key(x, y)] = terrain;
+}
+function markExit(world, map, name, x, y, toMap, toName) {
+  const known = mapFor(world, map, name);
+  known.tiles[key(x, y)] = "open";
+  known.exits[key(x, y)] = { toMap, toName };
+}
+function exitsOf(world, map) {
+  const known = world.maps[map];
+  if (!known) return [];
+  return Object.entries(known.exits).map(([at, to]) => {
+    const [x, y] = at.split(",").map(Number);
+    return { x, y, ...to };
+  });
+}
+function step(x, y, button) {
+  const move = STEPS.find((candidate) => candidate.button === button);
+  return move ? { x: x + move.dx, y: y + move.dy } : { x, y };
+}
+var SEARCH_RADIUS = 40;
+function routeTo(world, map, from, to) {
+  if (from.x === to.x && from.y === to.y) return [];
+  const blocked = (x, y) => terrainAt(world, map, x, y) === "wall";
+  if (blocked(to.x, to.y)) return null;
+  const start = key(from.x, from.y);
+  const cameFrom = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new Set([start]);
+  let frontier = [{ x: from.x, y: from.y }];
+  while (frontier.length > 0) {
+    const next = [];
+    for (const here of frontier) {
+      for (const move of STEPS) {
+        const x = here.x + move.dx;
+        const y = here.y + move.dy;
+        if (x < 0 || y < 0) continue;
+        if (Math.abs(x - from.x) > SEARCH_RADIUS || Math.abs(y - from.y) > SEARCH_RADIUS) continue;
+        const at = key(x, y);
+        if (seen.has(at) || blocked(x, y)) continue;
+        seen.add(at);
+        cameFrom.set(at, { prev: key(here.x, here.y), button: move.button });
+        if (x === to.x && y === to.y) return rebuild(cameFrom, start, at);
+        next.push({ x, y });
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+function rebuild(cameFrom, start, goal) {
+  const route = [];
+  let at = goal;
+  while (at !== start) {
+    const hop = cameFrom.get(at);
+    if (!hop) break;
+    route.unshift(hop.button);
+    at = hop.prev;
+  }
+  return route;
+}
+function frontiers(world, map, from, limit = 4) {
+  const known = world.maps[map];
+  const blocked = (x, y) => known?.tiles[key(x, y)] === "wall";
+  const tried = (x, y) => key(x, y) in (known?.tiles ?? {});
+  const found = [];
+  const seen = /* @__PURE__ */ new Set([key(from.x, from.y)]);
+  const cameFrom = /* @__PURE__ */ new Map();
+  let ring = [{ x: from.x, y: from.y }];
+  let distance = 0;
+  while (ring.length > 0 && distance < SEARCH_RADIUS && found.length < 24) {
+    distance++;
+    const next = [];
+    for (const here of ring) {
+      for (const move of STEPS) {
+        const x = here.x + move.dx;
+        const y = here.y + move.dy;
+        if (x < 0 || y < 0) continue;
+        const at = key(x, y);
+        if (seen.has(at) || blocked(x, y)) continue;
+        seen.add(at);
+        cameFrom.set(at, { prev: key(here.x, here.y), button: move.button });
+        if (!tried(x, y)) {
+          found.push({
+            x,
+            y,
+            route: rebuild(cameFrom, key(from.x, from.y), at),
+            bearing: bearing(x - from.x, y - from.y),
+            distance
+          });
+        } else {
+          next.push({ x, y });
+        }
+      }
+    }
+    ring = next;
+  }
+  const perBearing = /* @__PURE__ */ new Map();
+  for (const candidate of found.sort((a, b) => a.distance - b.distance)) {
+    if (!perBearing.has(candidate.bearing)) perBearing.set(candidate.bearing, candidate);
+  }
+  return [...perBearing.values()].slice(0, limit);
+}
+function bearing(dx, dy) {
+  const vertical = dy < 0 ? "north" : dy > 0 ? "south" : "";
+  const horizontal = dx < 0 ? "west" : dx > 0 ? "east" : "";
+  if (vertical && horizontal) {
+    if (Math.abs(dy) > Math.abs(dx) * 2) return vertical;
+    if (Math.abs(dx) > Math.abs(dy) * 2) return horizontal;
+    return `${vertical}-${horizontal}`;
+  }
+  return vertical || horizontal || "here";
+}
+function explored(world, map) {
+  const tiles = Object.values(world.maps[map]?.tiles ?? {});
+  return {
+    open: tiles.filter((terrain) => terrain === "open").length,
+    walls: tiles.filter((terrain) => terrain === "wall").length
+  };
+}
+
 // src/jev/journal.ts
 var MAX_NOTES = 25;
 var MAX_RECENT = 12;
@@ -238,6 +383,7 @@ function emptyJournal() {
   return {
     goal: "Get out of the house, meet PROF.OAK, and pick a starter Pokemon.",
     notes: [],
+    world: emptyWorld(),
     recent: [],
     stats: { turns: 0, battlesEntered: 0, battlesWon: 0, movesChosen: 0, pokemonCaught: 0 }
   };
@@ -1543,7 +1689,7 @@ function readGameState(gb) {
 }
 
 // src/harness/events.ts
-function buildStateEvent(state, analysis) {
+function buildStateEvent(state, analysis, world) {
   return {
     frame: state.frame,
     mode: state.mode,
@@ -1561,6 +1707,7 @@ function buildStateEvent(state, analysis) {
       status: mon.status
     })),
     screen: nonEmptyLines(state.screen),
+    map: buildMapView(state, world),
     battle: state.battle ? {
       kind: state.battle.kind,
       enemy: state.battle.enemy.species,
@@ -1570,6 +1717,18 @@ function buildStateEvent(state, analysis) {
       activeHpPercent: state.battle.player.hpPercent,
       analysis
     } : null
+  };
+}
+function buildMapView(state, world) {
+  const known = world?.maps[state.world.map];
+  if (!known) return null;
+  const split = (want) => Object.entries(known.tiles).filter(([, terrain]) => terrain === want).map(([at]) => at.split(",").map(Number));
+  return {
+    name: state.world.mapName,
+    at: { x: state.world.x, y: state.world.y },
+    open: split("open"),
+    walls: split("wall"),
+    exits: exitsOf(world, state.world.map).map((exit) => ({ x: exit.x, y: exit.y, to: exit.toName }))
   };
 }
 
@@ -1784,40 +1943,6 @@ function providerOptions(config) {
   return config.fallbacks.length > 0 ? { gateway: { models: config.fallbacks } } : void 0;
 }
 
-// src/harness/stuck.ts
-var NUDGE_AFTER = 4;
-var SHAKE_AFTER = 10;
-var SHAKE_SEQUENCE = ["START", "B", "A", "B", "DOWN", "LEFT", "UP", "RIGHT"];
-function fingerprint(state) {
-  return [
-    state.mode,
-    state.world.map,
-    state.world.x,
-    state.world.y,
-    state.world.playerName,
-    state.world.party.map((mon) => `${mon.species}:${mon.level}:${mon.hp}`).join(","),
-    state.battle ? `${state.battle.enemy.species}:${state.battle.enemy.hp}` : "",
-    state.screen.flat
-  ].join("|");
-}
-function trackStuck(previous, state) {
-  const current = fingerprint(state);
-  const intro = previous?.intro ?? 0;
-  if (previous && previous.fingerprint === current) {
-    return { fingerprint: current, turns: previous.turns + 1, intro };
-  }
-  return { fingerprint: current, turns: 0, intro };
-}
-var INTRO_PATIENCE = 200;
-function shakeButton(turnsStuck) {
-  const offset = Math.max(0, turnsStuck - SHAKE_AFTER);
-  return SHAKE_SEQUENCE[offset % SHAKE_SEQUENCE.length];
-}
-function stuckWarning(turnsStuck) {
-  if (turnsStuck < NUDGE_AFTER) return null;
-  return `Nothing has changed on screen for ${turnsStuck} turns \u2014 whatever you have been pressing is not working. Try something different: a direction you have not tried, B to back out of a menu, or START.`;
-}
-
 // src/jev/prompts.ts
 var JEV_IDENTITY = `You are Jev, an AI playing Pokemon Red on a real Game Boy emulator.
 You are a competent, decisive player: you know Generation 1 mechanics, you read the
@@ -1894,32 +2019,6 @@ YOUR CURRENT GOAL: ${journal.goal}
 SCREEN:
 ${nonEmptyLines(state.screen).map((line) => `  | ${line}`).join("\n")}`;
 }
-function formatOverworldBriefing(state, journal) {
-  const warning = stuckWarning(journal.stuck?.turns ?? 0);
-  return `OVERWORLD
-${warning ? `
-!! ${warning}
-` : ""}
-LOCATION: ${state.world.mapName} (map id ${state.world.map}) at tile x=${state.world.x}, y=${state.world.y}
-PLAYER: ${state.world.playerName || "(unnamed)"} | money \xA5${state.world.money} | badges: ${state.world.badges.join(", ") || "none"}
-
-${formatParty(state)}
-
-BAG: ${state.world.bag.map((b) => `${b.item} x${b.count}`).join(", ") || "(empty)"}
-
-SCREEN (exact text read from the tile map; \u25B6 is the menu cursor, \u25BC means a text box is waiting):
-${nonEmptyLines(state.screen).map((line) => `  | ${line}`).join("\n") || "  (no text on screen)"}
-${state.menu.maxItem > 0 ? `
-MENU: cursor is on entry ${state.menu.cursorIndex} of 0..${state.menu.maxItem}` : ""}
-
-YOUR CURRENT GOAL: ${journal.goal}
-
-NOTES YOU HAVE WRITTEN DOWN:
-${journal.notes.length ? journal.notes.map((n) => `  - ${n}`).join("\n") : "  (none yet)"}
-
-WHAT YOU JUST DID:
-${journal.recent.length ? journal.recent.map((r) => `  - ${r}`).join("\n") : "  (nothing yet)"}`;
-}
 
 // src/jev/battle-agent.ts
 var BattleDecisionSchema = z.object({
@@ -1993,99 +2092,306 @@ function sanitize(decision, analysis) {
   return decision;
 }
 
-// src/jev/overworld-agent.ts
+// src/jev/navigate-agent.ts
+import { experimental_evaluate as evaluate } from "ai";
 import { generateObject as generateObject2 } from "ai";
 import { z as z2 } from "zod";
-var ButtonPlanSchema = z2.object({
-  observation: z2.string().describe("What is happening on screen right now, in one sentence."),
-  goal: z2.string().describe("The objective you are working towards. Keep the previous goal unless it is done."),
-  inputs: z2.array(
-    z2.object({
-      button: z2.enum(BUTTONS),
-      repeat: z2.number().int().min(1).max(12).describe("How many times to press it (e.g. walking several tiles).")
-    })
-  ).min(1).max(6).describe("The button presses to perform now. Keep it short \u2014 you will see the result and can continue."),
-  noteToSelf: z2.string().nullable().describe("A durable fact worth remembering (a location, a blocked path, an NPC), or null.")
-});
-var OVERWORLD_INSTRUCTIONS = `Decide the next few button presses.
 
-How the game works:
-- A advances text and confirms; B cancels and backs out of menus; START opens the main menu.
-- The d-pad walks one tile per press. In Gen 1 the first press when facing a new direction
-  only turns you, so walking sometimes needs one extra press.
-- If a text box is waiting (\u25BC on screen), press A to continue.
-- If you are stuck in a menu you did not want, press B.
-
-Plan only a handful of presses. You will see the resulting screen and can decide again, so
-short, verifiable steps beat long speculative routes. If you appear to be repeating yourself
-or walking into a wall, try a different direction rather than the same one again.`;
-function fallbackButtonPlan(state, journal) {
-  const inputs = state.screen.awaitingInput ? [{ button: "A", repeat: 2 }] : [{ button: "DOWN", repeat: 1 }];
+// src/jev/destination.ts
+function optionsFor(state, world, journal) {
+  const options = [];
+  const here = { x: state.world.x, y: state.world.y };
+  const map = state.world.map;
+  for (const exit of exitsOf(world, map)) {
+    const route = routeTo(world, map, here, exit);
+    if (!route) continue;
+    options.push({
+      key: `exit:${exit.x},${exit.y}`,
+      description: `Leave by the exit at (${exit.x},${exit.y}), ${route.length} steps ${bearing(exit.x - here.x, exit.y - here.y)}. Last time it led to ${exit.toName}.`,
+      destination: { kind: "exit", x: exit.x, y: exit.y, route, toName: exit.toName }
+    });
+  }
+  for (const frontier of frontiers(world, map, here)) {
+    options.push({
+      key: `explore:${frontier.x},${frontier.y}`,
+      description: `Walk ${frontier.bearing} into ground nobody has stood on, ${frontier.distance} step${frontier.distance === 1 ? "" : "s"} away at (${frontier.x},${frontier.y}).`,
+      destination: {
+        kind: "explore",
+        x: frontier.x,
+        y: frontier.y,
+        route: frontier.route,
+        bearing: frontier.bearing
+      }
+    });
+  }
+  options.push({
+    key: "interact",
+    description: "Press A where you are standing: talk to whoever is in front of you, read the sign, or open what you are facing.",
+    destination: { kind: "interact" }
+  });
+  if (state.world.party.length > 0) {
+    options.push({
+      key: "menu",
+      description: "Open the START menu \u2014 your party, your bag, and saving.",
+      destination: { kind: "menu" }
+    });
+  }
+  if (state.menu.maxItem > 0 || state.screen.cursorRow >= 0) {
+    options.push({
+      key: "back",
+      description: "Press B to back out of the menu that is open.",
+      destination: { kind: "back" }
+    });
+  }
+  void journal;
+  return options;
+}
+function navigationState(state, world, journal) {
+  const seen = explored(world, state.world.map);
   return {
-    observation: "Fallback: model unavailable, taking a safe default action.",
-    goal: journal.goal,
-    inputs,
-    noteToSelf: null
+    situation: "Choosing where to walk next in Pokemon Red",
+    yourGoal: journal.goal,
+    location: state.world.mapName,
+    standingAt: { x: state.world.x, y: state.world.y },
+    thisMapSoFar: `${seen.open} tiles walked, ${seen.walls} walls found`,
+    knownExits: exitsOf(world, state.world.map).map((exit) => ({
+      at: { x: exit.x, y: exit.y },
+      leadsTo: exit.toName
+    })),
+    badges: state.world.badges,
+    party: state.world.party.map((mon) => ({
+      name: mon.nickname || mon.species,
+      level: mon.level,
+      hpPercent: mon.hpPercent,
+      status: mon.status
+    })),
+    screenText: state.screen.rows.filter((row) => row.trim()),
+    notesToSelf: journal.notes,
+    whatYouJustDid: journal.recent
   };
 }
-async function planOverworld(config, state, journal, screenshot) {
-  if (config.offline) {
-    return { plan: fallbackButtonPlan(state, journal), usedFallback: true };
+function fallbackDestination(options) {
+  const explore = options.filter((option) => option.destination.kind === "explore");
+  if (explore.length > 0) {
+    return explore.reduce(
+      (best, option) => routeLength(option) < routeLength(best) ? option : best
+    );
   }
-  const briefing = formatOverworldBriefing(state, journal);
-  const gateway = createJevGateway();
-  const text = `${OVERWORLD_INSTRUCTIONS}
+  const exit = options.find((option) => option.destination.kind === "exit");
+  return exit ?? options.find((option) => option.key === "interact") ?? options[0];
+}
+function routeLength(option) {
+  const destination = option.destination;
+  return "route" in destination ? destination.route.length : Infinity;
+}
+function describeDestination(destination) {
+  switch (destination.kind) {
+    case "explore":
+      return `explore ${destination.bearing} to (${destination.x},${destination.y})`;
+    case "exit":
+      return `head for the exit to ${destination.toName}`;
+    case "interact":
+      return "press A at what is in front";
+    case "menu":
+      return "open the menu";
+    case "back":
+      return "back out";
+  }
+}
 
-${briefing}`;
-  const content = screenshot && config.vision ? [
-    { type: "text", text },
-    { type: "text", text: "Here is the current screen as an image:" },
-    // A `file` part with an explicit media type; the `image` part is deprecated.
-    { type: "file", data: screenshot, mediaType: "image/png" }
-  ] : [{ type: "text", text }];
-  try {
-    const result = await generateObject2({
-      model: gateway(config.model),
-      schema: ButtonPlanSchema,
-      system: JEV_IDENTITY,
-      messages: [{ role: "user", content }],
-      ...config.temperature === void 0 ? {} : { temperature: config.temperature },
-      providerOptions: providerOptions(config)
-    });
-    return { plan: result.object, usedFallback: false };
-  } catch (error) {
-    console.error(`[jev] overworld model call failed, falling back: ${error.message}`);
-    return { plan: fallbackButtonPlan(state, journal), usedFallback: true };
+// src/harness/stuck.ts
+var NUDGE_AFTER = 4;
+var SHAKE_AFTER = 10;
+var SHAKE_SEQUENCE = ["START", "B", "A", "B", "DOWN", "LEFT", "UP", "RIGHT"];
+function fingerprint(state) {
+  return [
+    state.mode,
+    state.world.map,
+    state.world.x,
+    state.world.y,
+    state.world.playerName,
+    state.world.party.map((mon) => `${mon.species}:${mon.level}:${mon.hp}`).join(","),
+    state.battle ? `${state.battle.enemy.species}:${state.battle.enemy.hp}` : "",
+    state.screen.flat
+  ].join("|");
+}
+function trackStuck(previous, state) {
+  const current = fingerprint(state);
+  const intro = previous?.intro ?? 0;
+  if (previous && previous.fingerprint === current) {
+    return { fingerprint: current, turns: previous.turns + 1, intro };
   }
+  return { fingerprint: current, turns: 0, intro };
+}
+var INTRO_PATIENCE = 200;
+function shakeButton(turnsStuck) {
+  const offset = Math.max(0, turnsStuck - SHAKE_AFTER);
+  return SHAKE_SEQUENCE[offset % SHAKE_SEQUENCE.length];
+}
+function stuckWarning(turnsStuck) {
+  if (turnsStuck < NUDGE_AFTER) return null;
+  return `Nothing has changed on screen for ${turnsStuck} turns \u2014 whatever you have been pressing is not working. Try something different: a direction you have not tried, B to back out of a menu, or START.`;
+}
+
+// src/jev/navigate-agent.ts
+var INSTRUCTIONS = "You are Jev, playing Pokemon Red. Choose where to go next, working towards your goal. Unexplored ground is how you find doors, items and the next town, so prefer it when you do not know where you are going. Take a known exit when your goal is somewhere else. Press A when something in front of you is worth talking to or reading.";
+async function chooseDestination(config, state, world, journal, deps = {}) {
+  const options = optionsFor(state, world, journal);
+  const fallback = () => fallbackDestination(options);
+  if (config.offline) {
+    const option = fallback();
+    return { option, reasoning: `Offline: ${option.description}`, usedFallback: true };
+  }
+  const shared = navigationState(state, world, journal);
+  const warning = stuckWarning(journal.stuck?.turns ?? 0);
+  const judged = warning ? { warning, ...shared } : shared;
+  try {
+    if (config.mode === "evaluate") {
+      const criteria = Object.fromEntries(
+        options.map((option3) => [option3.key, option3.description])
+      );
+      const result = await evaluate({
+        model: deps.evaluationModel ? deps.evaluationModel(config.model) : createJevGateway().evaluationModel(config.model),
+        state: judged,
+        questions: { destination: { type: "choice", instructions: INSTRUCTIONS, criteria } },
+        ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
+      });
+      const answer = result.answers.destination;
+      const option2 = options.find((candidate) => candidate.key === answer.choice);
+      if (!option2) return { option: fallback(), reasoning: "Unrecognised destination.", usedFallback: true };
+      return {
+        option: option2,
+        reasoning: option2.description,
+        usedFallback: false,
+        considered: weigh(options, answer.choice, answer.probabilities)
+      };
+    }
+    const { object } = await generateObject2({
+      model: createJevGateway()(config.model),
+      schema: z2.object({
+        reasoning: z2.string().describe("One sentence: why there."),
+        destination: z2.enum(options.map((option2) => option2.key)).describe("The place to head for.")
+      }),
+      system: INSTRUCTIONS,
+      prompt: `${JSON.stringify(judged, null, 2)}
+
+Where to:
+` + options.map((option2) => `  ${option2.key}: ${option2.description}`).join("\n"),
+      ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
+    });
+    const option = options.find((candidate) => candidate.key === object.destination);
+    if (!option) return { option: fallback(), reasoning: "Unrecognised destination.", usedFallback: true };
+    return { option, reasoning: object.reasoning, usedFallback: false };
+  } catch (error) {
+    console.error(`[jev] navigation failed, exploring instead: ${error.message}`);
+    const option = fallback();
+    return { option, reasoning: `Model call failed; ${option.description}`, usedFallback: true };
+  }
+}
+function weigh(options, chosen, probabilities) {
+  return options.map((option) => ({
+    key: option.key,
+    label: shortLabel(option),
+    probability: probabilities?.[option.key] ?? null,
+    chosen: option.key === chosen
+  })).sort((a, b) => (b.probability ?? -1) - (a.probability ?? -1));
+}
+function shortLabel(option) {
+  const destination = option.destination;
+  switch (destination.kind) {
+    case "explore":
+      return `explore ${destination.bearing}`;
+    case "exit":
+      return `exit \u2192 ${destination.toName}`;
+    case "interact":
+      return "press A";
+    case "menu":
+      return "menu";
+    case "back":
+      return "back";
+  }
+}
+
+// src/harness/navigator.ts
+function walkStep(gb, walker, world, button) {
+  const before = readGameState(gb);
+  const target = step(before.world.x, before.world.y, button);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    walker.press(button);
+    const after = readGameState(gb);
+    if (after.world.map !== before.world.map) {
+      markExit(
+        world,
+        before.world.map,
+        before.world.mapName,
+        target.x,
+        target.y,
+        after.world.map,
+        after.world.mapName
+      );
+      mark(world, after.world.map, after.world.mapName, after.world.x, after.world.y, "open");
+      return { moved: true, changedMap: true, interrupted: true };
+    }
+    if (after.world.x !== before.world.x || after.world.y !== before.world.y) {
+      mark(world, before.world.map, before.world.mapName, after.world.x, after.world.y, "open");
+      return {
+        moved: true,
+        changedMap: false,
+        interrupted: after.battle !== null || after.screen.awaitingInput
+      };
+    }
+    if (after.battle !== null || after.screen.awaitingInput) {
+      return { moved: false, changedMap: false, interrupted: true };
+    }
+  }
+  mark(world, before.world.map, before.world.mapName, target.x, target.y, "wall");
+  return { moved: false, changedMap: false, interrupted: false };
+}
+function followRoute(gb, walker, world, route, maxSteps = 12) {
+  const planned = Math.min(route.length, maxSteps);
+  let taken = 0;
+  const start = readGameState(gb);
+  mark(world, start.world.map, start.world.mapName, start.world.x, start.world.y, "open");
+  for (const button of route.slice(0, maxSteps)) {
+    const result = walkStep(gb, walker, world, button);
+    if (result.moved) taken++;
+    if (result.changedMap) {
+      return { taken, planned, blockedAt: null, changedMap: true, interrupted: true };
+    }
+    if (!result.moved && !result.interrupted) {
+      return { taken, planned, blockedAt: button, changedMap: false, interrupted: false };
+    }
+    if (result.interrupted) {
+      return { taken, planned, blockedAt: null, changedMap: false, interrupted: true };
+    }
+  }
+  return { taken, planned, blockedAt: null, changedMap: false, interrupted: false };
 }
 
 // src/jev/evaluate-agent.ts
-import {
-  experimental_evaluate as evaluate,
-  Experimental_EvaluationUnsupportedQuestionTypeError as UnsupportedQuestionType
-} from "ai";
+import { experimental_evaluate as evaluate2 } from "ai";
 var GEN1_NOTES = [
   "A move is physical or special because of its TYPE, not per move.",
   "Ghost moves do nothing at all to Psychic types.",
   "Psychic is dominant; very little resists it.",
   "Struggle is what you get when every move is out of PP."
 ];
-function weigh(chosen, keys, label, probabilities) {
+function weigh2(chosen, keys, label, probabilities) {
   const all = [.../* @__PURE__ */ new Set([...keys, ...Object.keys(probabilities ?? {})])];
-  return all.map((key) => ({
-    key,
-    label: label(key),
-    probability: probabilities?.[key] ?? null,
-    chosen: key === chosen
+  return all.map((key2) => ({
+    key: key2,
+    label: label(key2),
+    probability: probabilities?.[key2] ?? null,
+    chosen: key2 === chosen
   })).sort((a, b) => (b.probability ?? -1) - (a.probability ?? -1));
 }
 function explain(chosen, label, probabilities) {
   if (!probabilities) return `Chose ${label(chosen)}.`;
   const ranked = Object.entries(probabilities).filter(([, p]) => p > 0.01).sort(([, a], [, b]) => b - a).slice(0, 4);
   const pct = (p) => `${Math.round(p * 100)}%`;
-  const rest = ranked.filter(([key]) => key !== chosen);
+  const rest = ranked.filter(([key2]) => key2 !== chosen);
   const confidence = probabilities[chosen];
-  return `${label(chosen)}${confidence === void 0 ? "" : ` at ${pct(confidence)} confidence`}` + (rest.length > 0 ? ` \u2014 also weighed ${rest.map(([key, p]) => `${label(key)} ${pct(p)}`).join(", ")}` : "");
+  return `${label(chosen)}${confidence === void 0 ? "" : ` at ${pct(confidence)} confidence`}` + (rest.length > 0 ? ` \u2014 also weighed ${rest.map(([key2, p]) => `${label(key2)} ${pct(p)}`).join(", ")}` : "");
 }
 function resolveModel(deps, modelId) {
   return deps.evaluationModel ? deps.evaluationModel(modelId) : createJevGateway().evaluationModel(modelId);
@@ -2150,7 +2456,7 @@ async function decideBattleByEvaluation(config, state, analysis, journal, deps =
     return { decision: fallbackBattleDecision(analysis), usedFallback: true };
   }
   try {
-    const result = await evaluate({
+    const result = await evaluate2({
       model: resolveModel(deps, config.battleModel),
       state: battleState(state, analysis, journal),
       questions: {
@@ -2163,7 +2469,7 @@ async function decideBattleByEvaluation(config, state, analysis, journal, deps =
       ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
     });
     const answer = result.answers.action;
-    const label = (key) => describeKey(key, analysis);
+    const label = (key2) => describeKey(key2, analysis);
     return {
       decision: toBattleDecision(
         answer.choice,
@@ -2171,24 +2477,24 @@ async function decideBattleByEvaluation(config, state, analysis, journal, deps =
         explain(answer.choice, label, answer.probabilities)
       ),
       usedFallback: false,
-      considered: weigh(answer.choice, Object.keys(criteria), label, answer.probabilities)
+      considered: weigh2(answer.choice, Object.keys(criteria), label, answer.probabilities)
     };
   } catch (error) {
     console.error(`[jev] battle evaluation failed, falling back: ${error.message}`);
     return { decision: fallbackBattleDecision(analysis), usedFallback: true };
   }
 }
-function describeKey(key, analysis) {
-  if (key.startsWith("move:")) {
-    const index = Number(key.slice(5));
-    return analysis.moves.find((move) => move.index === index)?.name ?? key;
+function describeKey(key2, analysis) {
+  if (key2.startsWith("move:")) {
+    const index = Number(key2.slice(5));
+    return analysis.moves.find((move) => move.index === index)?.name ?? key2;
   }
-  if (key.startsWith("switch:")) {
-    const slot = Number(key.slice(7));
+  if (key2.startsWith("switch:")) {
+    const slot = Number(key2.slice(7));
     return `switch to ${analysis.switchOptions.find((option) => option.slot === slot)?.name ?? slot}`;
   }
-  if (key.startsWith("item:")) return `use ${key.slice(5)}`;
-  return key;
+  if (key2.startsWith("item:")) return `use ${key2.slice(5)}`;
+  return key2;
 }
 function toBattleDecision(choice, analysis, reasoning) {
   if (choice.startsWith("move:")) {
@@ -2211,100 +2517,6 @@ function toBattleDecision(choice, analysis, reasoning) {
     return { reasoning, action: "run", moveIndex: null, partySlot: null, item: null, noteToSelf: null };
   }
   return { ...fallbackBattleDecision(analysis), reasoning: `${reasoning} (unrecognised option "${choice}")` };
-}
-var BUTTON_MEANINGS = {
-  UP: "Walk or face north. In a menu, move the cursor up.",
-  DOWN: "Walk or face south. In a menu, move the cursor down.",
-  LEFT: "Walk or face west. In a menu, move the cursor left.",
-  RIGHT: "Walk or face east. In a menu, move the cursor right.",
-  A: "Confirm, talk, read a sign, or advance a text box.",
-  B: "Cancel, or back out of a menu you did not want.",
-  START: "Open the main menu.",
-  SELECT: "Rarely useful; only for reordering items."
-};
-var REPEAT_LEVELS = [1, 2, 4, 8];
-function overworldState(state, journal) {
-  const warning = stuckWarning(journal.stuck?.turns ?? 0);
-  return {
-    ...warning ? { warning } : {},
-    situation: "Walking around in Pokemon Red",
-    yourGoal: journal.goal,
-    location: state.world.mapName,
-    position: { x: state.world.x, y: state.world.y },
-    badges: state.world.badges,
-    money: state.world.money,
-    party: state.world.party.map((mon) => ({
-      name: mon.nickname || mon.species,
-      level: mon.level,
-      hpPercent: mon.hpPercent,
-      status: mon.status
-    })),
-    screenText: nonEmptyLines(state.screen),
-    aTextBoxIsWaiting: state.screen.awaitingInput,
-    notesToSelf: journal.notes,
-    whatYouJustDid: journal.recent,
-    hint: "The first press toward a new direction only turns you; walking there needs another."
-  };
-}
-async function planOverworldByEvaluation(config, state, journal, deps = {}) {
-  const criteria = Object.fromEntries(
-    BUTTONS.map((button) => [button, BUTTON_MEANINGS[button]])
-  );
-  const shared = overworldState(state, journal);
-  const buttonQuestion = {
-    type: "choice",
-    instructions: "You are Jev, playing Pokemon Red. Choose the next button to press, working towards your goal. If a text box is waiting, press A. If you are stuck in a menu you did not want, press B. If you seem to be repeating yourself, try a different direction.",
-    criteria
-  };
-  try {
-    let answers;
-    try {
-      const result = await evaluate({
-        model: resolveModel(deps, config.model),
-        state: shared,
-        questions: {
-          button: buttonQuestion,
-          repeat: {
-            type: "score",
-            instructions: "How many times in a row should that button be pressed before looking at the screen again? Prefer fewer when anything uncertain is about to happen.",
-            criteria: ["once", "twice", "four times", "eight times"]
-          }
-        },
-        ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
-      });
-      answers = result.answers;
-    } catch (error) {
-      if (!UnsupportedQuestionType.isInstance(error)) throw error;
-      const result = await evaluate({
-        model: resolveModel(deps, config.model),
-        state: shared,
-        questions: { button: buttonQuestion },
-        ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
-      });
-      answers = result.answers;
-    }
-    const button = BUTTONS.includes(answers.button.choice) ? answers.button.choice : "A";
-    const level = Math.max(0, Math.min(REPEAT_LEVELS.length - 1, Math.round(answers.repeat?.score ?? 0)));
-    return {
-      plan: {
-        observation: explain(answers.button.choice, (key) => key, answers.button.probabilities),
-        goal: journal.goal,
-        // an evaluation model returns no prose to restate it with
-        inputs: [{ button, repeat: REPEAT_LEVELS[level] }],
-        noteToSelf: null
-      },
-      usedFallback: false,
-      considered: weigh(
-        answers.button.choice,
-        BUTTONS,
-        (key) => key,
-        answers.button.probabilities
-      )
-    };
-  } catch (error) {
-    console.error(`[jev] overworld evaluation failed, falling back: ${error.message}`);
-    return { plan: fallbackButtonPlan(state, journal), usedFallback: true };
-  }
 }
 
 // src/game/intro.ts
@@ -2354,6 +2566,7 @@ function analyzeIfBattle(state, config) {
 }
 async function takeTurn(params) {
   const { gb, controller, config, journal, state, analysis } = params;
+  const world = journal.world ??= emptyWorld();
   journal.stuck = trackStuck(journal.stuck, state);
   const stuckFor = journal.stuck.turns;
   const introPhase = detectIntroPhase(state);
@@ -2418,7 +2631,7 @@ async function takeTurn(params) {
       stuckFor
     };
   }
-  return takeOverworldTurn({ gb, controller, config, journal, state, stuckFor });
+  return takeOverworldTurn({ gb, controller, config, journal, state, world, stuckFor });
 }
 async function takeBattleTurn(params) {
   const { controller, config, journal, state, analysis, stuckFor } = params;
@@ -2471,30 +2684,37 @@ async function takeBattleTurn(params) {
   };
 }
 async function takeOverworldTurn(params) {
-  const { gb, controller, config, journal, state, stuckFor } = params;
+  const { gb, controller, config, journal, state, world, stuckFor } = params;
   const started = Date.now();
-  const { plan, usedFallback, considered } = config.mode === "evaluate" && !config.offline ? await planOverworldByEvaluation(config, state, journal) : {
-    ...await planOverworld(
-      config,
-      state,
-      journal,
-      config.vision ? screenToPng(gb.screen(), 3) : void 0
-    ),
-    considered: void 0
-  };
+  const { option, reasoning, usedFallback, considered } = await chooseDestination(config, state, world, journal);
   const latencyMs = Date.now() - started;
-  for (const input of plan.inputs) {
-    controller.press(input.button, input.repeat);
+  const destination = option.destination;
+  let action = describeDestination(destination);
+  let detail = journal.goal;
+  if (destination.kind === "interact") {
+    controller.press("A");
+  } else if (destination.kind === "menu") {
+    controller.press("START");
+  } else if (destination.kind === "back") {
+    controller.press("B");
+  } else {
+    const report = followRoute(gb, controller, world, destination.route);
+    detail = `${report.taken}/${report.planned} steps`;
+    if (report.changedMap) {
+      const now = readGameState(gb);
+      detail += ` \u2192 ${now.world.mapName}`;
+      addNote(journal, `${state.world.mapName} (${destination.x},${destination.y}) leads to ${now.world.mapName}`);
+    } else if (report.blockedAt) {
+      detail += ` \u2192 blocked going ${report.blockedAt}, remembered`;
+      action += " (hit a wall)";
+    }
   }
-  if (plan.goal && plan.goal !== journal.goal) journal.goal = plan.goal;
-  if (plan.noteToSelf) addNote(journal, plan.noteToSelf);
-  const pressed = plan.inputs.map((input) => input.repeat > 1 ? `${input.button}x${input.repeat}` : input.button).join(" ");
-  addRecent(journal, `${state.world.mapName}: ${pressed} (${plan.observation})`);
+  addRecent(journal, `${state.world.mapName}: ${action} \u2014 ${detail}`);
   return {
     kind: "overworld",
-    reasoning: plan.observation,
-    action: pressed,
-    detail: plan.goal,
+    reasoning,
+    action,
+    detail,
     model: config.model,
     usedFallback,
     latencyMs,
@@ -2542,11 +2762,12 @@ var FrameRecorder = class {
 function describe(gb, journal, turns, config) {
   const state = readGameState(gb);
   return {
-    state: buildStateEvent(state, analyzeIfBattle(state, config)),
+    state: buildStateEvent(state, analyzeIfBattle(state, config), journal.world),
     journal: {
       goal: journal.goal,
       notes: journal.notes,
-      stats: journal.stats
+      stats: journal.stats,
+      stuckFor: journal.stuck?.turns ?? 0
     },
     turns
   };
@@ -2632,7 +2853,7 @@ var Controller = class {
    */
   navigateList(matches, direction = "DOWN", maxSteps = 10) {
     const seen = /* @__PURE__ */ new Set();
-    for (let step = 0; step < maxSteps; step++) {
+    for (let step2 = 0; step2 < maxSteps; step2++) {
       const label = this.cursorLabel();
       if (label && matches(label)) return true;
       if (label) {
@@ -2651,9 +2872,9 @@ var Controller = class {
    * wherever the cursor happens to be.
    */
   navigateGrid(matches, directions = ["DOWN", "RIGHT"], maxSteps = 5) {
-    for (let step = 0; step < maxSteps; step++) {
+    for (let step2 = 0; step2 < maxSteps; step2++) {
       if (this.#labelMatches(matches)) return true;
-      this.press(directions[step % directions.length]);
+      this.press(directions[step2 % directions.length]);
     }
     return this.#labelMatches(matches);
   }
