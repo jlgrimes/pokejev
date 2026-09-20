@@ -6,8 +6,15 @@ import { analyzeIfBattle } from '../../src/harness/turn.ts';
 import type { JevConfig } from '../../src/jev/model.ts';
 import type { Journal } from '../../src/jev/journal.ts';
 
-/** Start by capturing every other emulated frame, i.e. 30fps of game time. */
-const INITIAL_STRIDE = 2;
+/**
+ * Frames captured per emulated frame, before the adaptive backoff below.
+ *
+ * Encoding a screenshot costs more than running the emulator frame that
+ * produced it, so this is the single biggest lever on how fast a tick gets
+ * through the game. JEV_SPEED multiplies it: at 10 the game plays back ten
+ * times faster and spends a fraction of the time drawing it.
+ */
+const INITIAL_STRIDE = 2 * Math.max(1, Math.min(20, Number(process.env.JEV_SPEED ?? 4)));
 /** ~8 seconds of playback. Bounds the response regardless of how long a tick ran. */
 const MAX_FRAMES = 240;
 

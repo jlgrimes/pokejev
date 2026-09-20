@@ -57,6 +57,8 @@ export interface StatusEvent {
   running: boolean;
   paused: boolean;
   turns: number;
+  /** Playback multiplier; also how sparsely frames are sampled. */
+  speed?: number;
   goal: string;
   notes: string[];
   stats: Record<string, number>;

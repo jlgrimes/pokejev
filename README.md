@@ -263,6 +263,26 @@ Progress is written to durable storage every `JEV_PERSIST_EVERY` turns (default
 position, same journal. The snapshot has the ROM stripped out of it, which is
 the difference between 3.3MB and 440KB per write.
 
+## Speed
+
+The emulator runs at roughly 8x real time on its own, but capturing the picture
+costs more than running it: encoding a screenshot every other frame measured at
+987ms per 600 frames against 644ms for the emulation itself.
+
+`JEV_SPEED` (1-20, default 4) and the speed buttons in the viewer therefore do
+two things at once — the game plays back that many times faster, and it samples
+that many times more sparsely, so most of the drawing cost disappears:
+
+| capture | time per 600 frames |
+| --- | --- |
+| emulation only | 644ms |
+| every 2 frames (1x) | 1631ms |
+| every 10 frames (5x) | 843ms |
+| every 20 frames (10x) | 678ms |
+
+What this does not speed up is the model call, which dominates a turn. Speed
+makes the game between decisions fly past; it cannot make Jev think faster.
+
 ## Configuration
 
 Jev's brain is one env var. Any gateway model works, and battles can use a

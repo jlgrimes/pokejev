@@ -74,6 +74,8 @@ export class JevRunner implements ViewerControls {
   isPaused(): boolean { return this.#paused; }
   stop(): void { this.#stopped = true; this.#pump.stop(); }
   queueInput(button: Button): void { this.#inputQueue.push(button); }
+  setSpeed(multiplier: number): void { this.#pump.setSpeed(multiplier); this.#emitStatus(); }
+  get speed(): number { return this.#pump.speed; }
 
   get journal(): Journal { return this.#journal; }
   get turns(): number { return this.#turns; }
@@ -177,6 +179,7 @@ export class JevRunner implements ViewerControls {
       running: !this.#stopped,
       paused: this.#paused,
       turns: this.#turns,
+      speed: this.#pump.speed,
       goal: this.#journal.goal,
       notes: this.#journal.notes,
       stats: this.#journal.stats as unknown as Record<string, number>,

@@ -147,6 +147,7 @@ async function startPlaying(rom: Buffer): Promise<void> {
     events,
     startPaused: process.env.JEV_START_PAUSED === 'true',
   });
+  runner.setSpeed(Number(process.env.JEV_SPEED ?? 4));
 
   let lastPersistedTurn = journal.stats.turns;
   events.on('status', (status) => {
@@ -188,6 +189,7 @@ const controls: ViewerControls = {
   step: () => runner?.step(),
   queueInput: (button: Button) => runner?.queueInput(button),
   isPaused: () => runner?.isPaused() ?? true,
+  setSpeed: (multiplier: number) => runner?.setSpeed(multiplier),
 };
 
 const token = process.env.JEV_ACCESS_TOKEN ?? randomBytes(12).toString('base64url');

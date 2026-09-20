@@ -139,3 +139,50 @@ describe('frame recording', () => {
     assert.equal(last.subarray(1, 4).toString('ascii'), 'PNG');
   });
 });
+
+describe('playback speed', () => {
+  /** How many frames the pump would actually encode over a fixed run. */
+  const encodedFrames = async (speed: number): Promise<number> => {
+    const { FramePump } = await import('../src/harness/frame-pump.ts');
+    const { JevEvents } = await import('../src/harness/events.ts');
+    const gb = bootTestRom();
+    const pump = new FramePump(new JevEvents());
+    pump.setSpeed(speed);
+    pump.attach(gb);
+
+    const capture = gb.onFrame!;
+    let encoded = 0;
+    gb.onFrame = (emulator) => {
+      const before = pump.queuedFrames;
+      capture(emulator);
+      if (pump.queuedFrames > before) encoded++;
+    };
+    // Short enough that the undrained queue never hits its cap, which would
+    // otherwise stop capture early and hide the stride being measured.
+    gb.advance(100);
+    return encoded;
+  };
+
+  test('higher speed encodes fewer frames, which is where the saving is', async () => {
+    // Screenshot encoding costs more than the emulation producing it, so
+    // sampling sparsely is what makes a faster speed genuinely faster rather
+    // than merely look faster.
+    const atNormal = await encodedFrames(1);
+    const atTenTimes = await encodedFrames(10);
+
+    assert.equal(atNormal, 50, 'every other frame at 1x');
+    assert.equal(atTenTimes, 5, 'every twentieth frame at 10x');
+    assert.ok(atTenTimes * 10 === atNormal, 'the stride should scale with speed');
+  });
+
+  test('refuses absurd or useless multipliers', async () => {
+    const { FramePump } = await import('../src/harness/frame-pump.ts');
+    const { JevEvents } = await import('../src/harness/events.ts');
+    const pump = new FramePump(new JevEvents());
+
+    pump.setSpeed(999);
+    assert.equal(pump.speed, 20);
+    pump.setSpeed(0);
+    assert.equal(pump.speed, 1);
+  });
+});

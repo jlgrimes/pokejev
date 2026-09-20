@@ -18,6 +18,7 @@ export class FramePump {
   #captureEvery: number;
   #maxQueue: number;
   #frameCounter = 0;
+  #speed = 1;
 
   constructor(
     private events: JevEvents,
@@ -30,11 +31,34 @@ export class FramePump {
 
   #fps: number;
 
+  /**
+   * Play at `multiplier` times normal speed.
+   *
+   * This is not a cosmetic setting. Frames are drained at a fixed rate, so
+   * covering more game time per second means sampling more sparsely — and
+   * sampling is the expensive part. Encoding a screenshot every other frame
+   * costs roughly two and a half times as much as running the emulator that
+   * produced it, so raising the multiplier makes the game genuinely run
+   * faster as well as look faster.
+   */
+  setSpeed(multiplier: number): void {
+    this.#speed = Math.max(1, Math.min(20, Math.round(multiplier)));
+  }
+
+  get speed(): number {
+    return this.#speed;
+  }
+
+  /** Frames waiting to be sent; used to observe what was captured. */
+  get queuedFrames(): number {
+    return this.#queue.length;
+  }
+
   /** Attach to an emulator so every frame is considered for capture. */
   attach(gb: GameBoy): void {
     gb.onFrame = (emulator) => {
       this.#frameCounter++;
-      if (this.#frameCounter % this.#captureEvery !== 0) return;
+      if (this.#frameCounter % (this.#captureEvery * this.#speed) !== 0) return;
       if (this.#queue.length >= this.#maxQueue) return; // viewer is behind; skip
       this.#queue.push(screenToPng(emulator.screen(), 1).toString('base64'));
     };

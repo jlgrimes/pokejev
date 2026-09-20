@@ -64,6 +64,7 @@ describe('live viewer', () => {
         step: () => calls.push('step'),
         queueInput: (button: Button) => calls.push(`input:${button}`),
         isPaused: () => paused,
+        setSpeed: (multiplier: number) => calls.push(`speed:${multiplier}`),
       },
     };
   };
@@ -256,7 +257,8 @@ describe('live viewer', () => {
     await post({ command: 'step' });
     assert.deepEqual(await post({ command: 'resume' }), { ok: true, paused: false });
 
-    assert.deepEqual(stub.calls, ['pause', 'input:A', 'step', 'resume']);
+    await post({ command: 'speed', speed: 10 });
+    assert.deepEqual(stub.calls, ['pause', 'input:A', 'step', 'resume', 'speed:10']);
   });
 });
 

@@ -51,6 +51,7 @@
     border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 12px;
   }
   button:hover { border-color: var(--accent-dim); color: var(--accent); }
+  button.on { border-color: var(--accent); color: var(--accent); background: #1b2018; }
   .dpad { display: grid; grid-template-columns: repeat(3, 38px); gap: 4px; margin-top: 10px; }
   .dpad button { padding: 6px 0; }
   .dpad .spacer { visibility: hidden; }
@@ -137,6 +138,14 @@
         <button data-btn="START">Start</button>
         <button data-btn="SELECT">Select</button>
       </div>
+      <div class="controls" id="speeds">
+        <span class="hint" style="margin:0;align-self:center">speed</span>
+        <button data-speed="1">1x</button>
+        <button data-speed="2">2x</button>
+        <button data-speed="4">4x</button>
+        <button data-speed="10">10x</button>
+        <button data-speed="20">20x</button>
+      </div>
       <div class="dpad">
         <span class="spacer"></span><button data-btn="UP">↑</button><span class="spacer"></span>
         <button data-btn="LEFT">←</button><span class="spacer"></span><button data-btn="RIGHT">→</button>
@@ -213,6 +222,11 @@ source.addEventListener('status', (e) => {
   $('pause').textContent = s.paused ? 'Resume' : 'Pause';
   $('turns').textContent = 'turn ' + s.turns;
   $('goal').textContent = s.goal || '—';
+  if (s.speed) {
+    for (const button of document.querySelectorAll('[data-speed]')) {
+      button.classList.toggle('on', Number(button.dataset.speed) === s.speed);
+    }
+  }
 });
 
 source.addEventListener('state', (e) => {
@@ -389,6 +403,10 @@ const send = (body) => fetch('/control', {
   entry.textContent = error.message;
   $('log').prepend(entry);
 });
+
+for (const button of document.querySelectorAll('[data-speed]')) {
+  button.onclick = () => send({ command: 'speed', speed: Number(button.dataset.speed) });
+}
 
 $('pause').onclick = () => send({ command: paused ? 'resume' : 'pause' });
 $('step').onclick = () => send({ command: 'step' });

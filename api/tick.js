@@ -2132,7 +2132,7 @@ async function takeOverworldTurn(params) {
 }
 
 // server/_lib/engine.ts
-var INITIAL_STRIDE = 2;
+var INITIAL_STRIDE = 2 * Math.max(1, Math.min(20, Number(process.env.JEV_SPEED ?? 4)));
 var MAX_FRAMES = 240;
 var FrameRecorder = class {
   #frames = [];

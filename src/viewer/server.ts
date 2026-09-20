@@ -15,6 +15,8 @@ export interface ViewerControls {
   /** Queue a manual button press to be applied before Jev's next decision. */
   queueInput(button: Button): void;
   isPaused(): boolean;
+  /** Play at N times normal speed. */
+  setSpeed?(multiplier: number): void;
 }
 
 export interface ViewerHandle {
@@ -272,14 +274,16 @@ export function startViewer(
 
     if (url.pathname === '/control' && req.method === 'POST') {
       void readBody(req).then((body) => {
-        const { command, button } = JSON.parse(body || '{}') as {
+        const { command, button, speed } = JSON.parse(body || '{}') as {
           command: string;
           button?: Button;
+          speed?: number;
         };
         if (command === 'pause') controls.pause();
         else if (command === 'resume') controls.resume();
         else if (command === 'step') controls.step();
         else if (command === 'input' && button) controls.queueInput(button);
+        else if (command === 'speed' && typeof speed === 'number') controls.setSpeed?.(speed);
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, paused: controls.isPaused() }));
       });

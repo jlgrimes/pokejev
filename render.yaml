@@ -13,6 +13,8 @@ services:
         value: typesafe-ai/jev
       - key: JEV_VISION
         value: 'true'
+      - key: JEV_SPEED
+        value: '4'
       # Required: nothing outside Vercel can use the OIDC token, so the
       # container needs a real gateway key. Paste it in the dashboard.
       - key: AI_GATEWAY_API_KEY
