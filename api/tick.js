@@ -1762,6 +1762,7 @@ function loadConfig(overrides = {}) {
     fallbacks,
     vision: process.env.JEV_VISION !== "false",
     fairPlay: process.env.JEV_FAIR_PLAY === "true",
+    mode: process.env.JEV_MODE === "generate" ? "generate" : "evaluate",
     offline: false,
     temperature: process.env.JEV_TEMPERATURE ? Number(process.env.JEV_TEMPERATURE) : void 0,
     ...overrides
@@ -2023,6 +2024,229 @@ ${briefing}`;
   }
 }
 
+// src/jev/evaluate-agent.ts
+import {
+  experimental_evaluate as evaluate,
+  Experimental_EvaluationUnsupportedQuestionTypeError as UnsupportedQuestionType
+} from "ai";
+var GEN1_NOTES = [
+  "A move is physical or special because of its TYPE, not per move.",
+  "Ghost moves do nothing at all to Psychic types.",
+  "Psychic is dominant; very little resists it.",
+  "Struggle is what you get when every move is out of PP."
+];
+function explain(chosen, label, probabilities) {
+  if (!probabilities) return `Chose ${label(chosen)}.`;
+  const ranked = Object.entries(probabilities).filter(([, p]) => p > 0.01).sort(([, a], [, b]) => b - a).slice(0, 4);
+  const pct = (p) => `${Math.round(p * 100)}%`;
+  const rest = ranked.filter(([key]) => key !== chosen);
+  const confidence = probabilities[chosen];
+  return `${label(chosen)}${confidence === void 0 ? "" : ` at ${pct(confidence)} confidence`}` + (rest.length > 0 ? ` \u2014 also weighed ${rest.map(([key, p]) => `${label(key)} ${pct(p)}`).join(", ")}` : "");
+}
+function resolveModel(deps, modelId) {
+  return deps.evaluationModel ? deps.evaluationModel(modelId) : createJevGateway().evaluationModel(modelId);
+}
+function battleState(state, analysis, journal) {
+  const battle = state.battle;
+  return {
+    situation: `${battle.kind} battle in Pokemon Red`,
+    generation1Rules: GEN1_NOTES,
+    yourGoal: journal.goal,
+    you: {
+      pokemon: battle.player.nickname || battle.player.species,
+      level: battle.player.level,
+      hp: `${battle.player.hp}/${battle.player.maxHp}`,
+      hpPercent: battle.player.hpPercent,
+      status: battle.player.status,
+      types: battle.player.types.filter((type) => type !== "UNKNOWN")
+    },
+    opponent: {
+      pokemon: battle.enemy.species,
+      level: battle.enemy.level,
+      hpPercent: battle.enemy.hpPercent,
+      status: battle.enemy.status,
+      types: battle.enemy.types.filter((type) => type !== "UNKNOWN")
+    },
+    whoMovesFirst: analysis.fasterSide,
+    youAreInKnockoutRange: analysis.inKoRange,
+    turnsYouCanSurvive: Number.isFinite(analysis.turnsToSurvive) ? analysis.turnsToSurvive : null,
+    threatsAgainstYou: analysis.incoming.map((threat) => ({
+      move: threat.move,
+      type: threat.type,
+      typicalDamageToYou: threat.damage.typical,
+      couldKnockYouOut: threat.canKo
+    })),
+    screen: nonEmptyLines(state.screen)
+  };
+}
+function battleCriteria(state, analysis) {
+  const criteria = {};
+  for (const move of analysis.moves) {
+    if (move.pp === 0) continue;
+    const outcome = move.guaranteedKo ? "guaranteed knockout" : move.possibleKo ? "can knock it out" : `${Math.round(move.damage.fractionOfTargetHp * 100)}% of its health`;
+    criteria[`move:${move.index}`] = `Use ${move.name} (${move.type}). ${move.effectivenessLabel}, about ${move.damage.typical} damage \u2014 ${outcome}. ${move.accuracy ?? 100}% accurate, ${move.pp} PP left.` + (move.notes.length > 0 ? ` Note: ${move.notes.join("; ")}.` : "");
+  }
+  for (const option of analysis.switchOptions) {
+    criteria[`switch:${option.slot}`] = `Switch to ${option.name} at ${option.hpPercent}% health \u2014 ${option.note}. Costs a turn.`;
+  }
+  if (state.battle?.kind === "wild") {
+    criteria["run"] = "Flee the battle, forfeiting any experience.";
+  }
+  const healing = state.world.bag.find((entry) => /POTION|FULL RESTORE/i.test(entry.item));
+  if (healing && state.battle && state.battle.player.hpPercent < 60) {
+    criteria[`item:${healing.item}`] = `Use a ${healing.item} to restore health. Costs a turn.`;
+  }
+  return criteria;
+}
+async function decideBattleByEvaluation(config, state, analysis, journal, deps = {}) {
+  const criteria = battleCriteria(state, analysis);
+  if (Object.keys(criteria).length === 0) {
+    return { decision: fallbackBattleDecision(analysis), usedFallback: true };
+  }
+  try {
+    const result = await evaluate({
+      model: resolveModel(deps, config.battleModel),
+      state: battleState(state, analysis, journal),
+      questions: {
+        action: {
+          type: "choice",
+          instructions: "You are Jev, playing Pokemon Red. Choose this turn's action. Take a guaranteed knockout when one is available. If you are in knockout range and cannot win the race, switching or healing is worth the turn. Compare the actual damage numbers rather than trusting type labels alone.",
+          criteria
+        }
+      },
+      ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
+    });
+    const answer = result.answers.action;
+    return {
+      decision: toBattleDecision(answer.choice, analysis, explain(answer.choice, (key) => describeKey(key, analysis), answer.probabilities)),
+      usedFallback: false
+    };
+  } catch (error) {
+    console.error(`[jev] battle evaluation failed, falling back: ${error.message}`);
+    return { decision: fallbackBattleDecision(analysis), usedFallback: true };
+  }
+}
+function describeKey(key, analysis) {
+  if (key.startsWith("move:")) {
+    const index = Number(key.slice(5));
+    return analysis.moves.find((move) => move.index === index)?.name ?? key;
+  }
+  if (key.startsWith("switch:")) {
+    const slot = Number(key.slice(7));
+    return `switch to ${analysis.switchOptions.find((option) => option.slot === slot)?.name ?? slot}`;
+  }
+  if (key.startsWith("item:")) return `use ${key.slice(5)}`;
+  return key;
+}
+function toBattleDecision(choice, analysis, reasoning) {
+  if (choice.startsWith("move:")) {
+    const index = Number(choice.slice(5));
+    const move = analysis.moves.find((candidate) => candidate.index === index);
+    if (move) {
+      return { reasoning, action: "fight", moveIndex: move.index, partySlot: null, item: null, noteToSelf: null };
+    }
+  }
+  if (choice.startsWith("switch:")) {
+    const slot = Number(choice.slice(7));
+    if (analysis.switchOptions.some((option) => option.slot === slot)) {
+      return { reasoning, action: "switch", moveIndex: null, partySlot: slot, item: null, noteToSelf: null };
+    }
+  }
+  if (choice.startsWith("item:")) {
+    return { reasoning, action: "item", moveIndex: null, partySlot: null, item: choice.slice(5), noteToSelf: null };
+  }
+  if (choice === "run") {
+    return { reasoning, action: "run", moveIndex: null, partySlot: null, item: null, noteToSelf: null };
+  }
+  return { ...fallbackBattleDecision(analysis), reasoning: `${reasoning} (unrecognised option "${choice}")` };
+}
+var BUTTON_MEANINGS = {
+  UP: "Walk or face north. In a menu, move the cursor up.",
+  DOWN: "Walk or face south. In a menu, move the cursor down.",
+  LEFT: "Walk or face west. In a menu, move the cursor left.",
+  RIGHT: "Walk or face east. In a menu, move the cursor right.",
+  A: "Confirm, talk, read a sign, or advance a text box.",
+  B: "Cancel, or back out of a menu you did not want.",
+  START: "Open the main menu.",
+  SELECT: "Rarely useful; only for reordering items."
+};
+var REPEAT_LEVELS = [1, 2, 4, 8];
+function overworldState(state, journal) {
+  return {
+    situation: "Walking around in Pokemon Red",
+    yourGoal: journal.goal,
+    location: state.world.mapName,
+    position: { x: state.world.x, y: state.world.y },
+    badges: state.world.badges,
+    money: state.world.money,
+    party: state.world.party.map((mon) => ({
+      name: mon.nickname || mon.species,
+      level: mon.level,
+      hpPercent: mon.hpPercent,
+      status: mon.status
+    })),
+    screenText: nonEmptyLines(state.screen),
+    aTextBoxIsWaiting: state.screen.awaitingInput,
+    notesToSelf: journal.notes,
+    whatYouJustDid: journal.recent,
+    hint: "The first press toward a new direction only turns you; walking there needs another."
+  };
+}
+async function planOverworldByEvaluation(config, state, journal, deps = {}) {
+  const criteria = Object.fromEntries(
+    BUTTONS.map((button) => [button, BUTTON_MEANINGS[button]])
+  );
+  const shared = overworldState(state, journal);
+  const buttonQuestion = {
+    type: "choice",
+    instructions: "You are Jev, playing Pokemon Red. Choose the next button to press, working towards your goal. If a text box is waiting, press A. If you are stuck in a menu you did not want, press B. If you seem to be repeating yourself, try a different direction.",
+    criteria
+  };
+  try {
+    let answers;
+    try {
+      const result = await evaluate({
+        model: resolveModel(deps, config.model),
+        state: shared,
+        questions: {
+          button: buttonQuestion,
+          repeat: {
+            type: "score",
+            instructions: "How many times in a row should that button be pressed before looking at the screen again? Prefer fewer when anything uncertain is about to happen.",
+            criteria: ["once", "twice", "four times", "eight times"]
+          }
+        },
+        ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
+      });
+      answers = result.answers;
+    } catch (error) {
+      if (!UnsupportedQuestionType.isInstance(error)) throw error;
+      const result = await evaluate({
+        model: resolveModel(deps, config.model),
+        state: shared,
+        questions: { button: buttonQuestion },
+        ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
+      });
+      answers = result.answers;
+    }
+    const button = BUTTONS.includes(answers.button.choice) ? answers.button.choice : "A";
+    const level = Math.max(0, Math.min(REPEAT_LEVELS.length - 1, Math.round(answers.repeat?.score ?? 0)));
+    return {
+      plan: {
+        observation: explain(answers.button.choice, (key) => key, answers.button.probabilities),
+        goal: journal.goal,
+        // an evaluation model returns no prose to restate it with
+        inputs: [{ button, repeat: REPEAT_LEVELS[level] }],
+        noteToSelf: null
+      },
+      usedFallback: false
+    };
+  } catch (error) {
+    console.error(`[jev] overworld evaluation failed, falling back: ${error.message}`);
+    return { plan: fallbackButtonPlan(state, journal), usedFallback: true };
+  }
+}
+
 // src/harness/turn.ts
 function analyzeIfBattle(state, config) {
   if (!state.battle) return null;
@@ -2062,7 +2286,7 @@ async function takeTurn(params) {
 async function takeBattleTurn(params) {
   const { controller, config, journal, state, analysis } = params;
   const started = Date.now();
-  const { decision, usedFallback } = await decideBattleAction(config, state, analysis, journal);
+  const { decision, usedFallback } = config.mode === "evaluate" && !config.offline ? await decideBattleByEvaluation(config, state, analysis, journal) : await decideBattleAction(config, state, analysis, journal);
   const latencyMs = Date.now() - started;
   let detail = "";
   let executed = false;
@@ -2110,8 +2334,7 @@ async function takeBattleTurn(params) {
 async function takeOverworldTurn(params) {
   const { gb, controller, config, journal, state } = params;
   const started = Date.now();
-  const screenshot = config.vision ? screenToPng(gb.screen(), 3) : void 0;
-  const { plan, usedFallback } = await planOverworld(config, state, journal, screenshot);
+  const { plan, usedFallback } = config.mode === "evaluate" && !config.offline ? await planOverworldByEvaluation(config, state, journal) : await planOverworld(config, state, journal, config.vision ? screenToPng(gb.screen(), 3) : void 0);
   const latencyMs = Date.now() - started;
   for (const input of plan.inputs) {
     controller.press(input.button, input.repeat);

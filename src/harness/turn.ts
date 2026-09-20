@@ -4,6 +4,7 @@ import type { GameState } from '../game/state.ts';
 import { analyzeBattle, type BattleAnalysis } from '../game/battle.ts';
 import { decideBattleAction } from '../jev/battle-agent.ts';
 import { planOverworld } from '../jev/overworld-agent.ts';
+import { decideBattleByEvaluation, planOverworldByEvaluation } from '../jev/evaluate-agent.ts';
 import { screenToPng } from '../emulator/png.ts';
 import type { JevConfig } from '../jev/model.ts';
 import { addNote, addRecent, type Journal } from '../jev/journal.ts';
@@ -85,7 +86,10 @@ async function takeBattleTurn(params: {
 }): Promise<TurnOutcome> {
   const { controller, config, journal, state, analysis } = params;
   const started = Date.now();
-  const { decision, usedFallback } = await decideBattleAction(config, state, analysis, journal);
+  const { decision, usedFallback } =
+    config.mode === 'evaluate' && !config.offline
+      ? await decideBattleByEvaluation(config, state, analysis, journal)
+      : await decideBattleAction(config, state, analysis, journal);
   const latencyMs = Date.now() - started;
 
   let detail = '';
@@ -149,8 +153,12 @@ async function takeOverworldTurn(params: {
 }): Promise<TurnOutcome> {
   const { gb, controller, config, journal, state } = params;
   const started = Date.now();
-  const screenshot = config.vision ? screenToPng(gb.screen(), 3) : undefined;
-  const { plan, usedFallback } = await planOverworld(config, state, journal, screenshot);
+  // An evaluation model takes structured state, not pictures, so the
+  // screenshot is only built for the generative path that can use it.
+  const { plan, usedFallback } =
+    config.mode === 'evaluate' && !config.offline
+      ? await planOverworldByEvaluation(config, state, journal)
+      : await planOverworld(config, state, journal, config.vision ? screenToPng(gb.screen(), 3) : undefined);
   const latencyMs = Date.now() - started;
 
   for (const input of plan.inputs) {

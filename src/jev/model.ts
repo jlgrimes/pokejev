@@ -17,6 +17,15 @@ export interface JevConfig {
   vision: boolean;
   /** Hide information a human player could not see (enemy movesets, exact stats). */
   fairPlay: boolean;
+  /**
+   * How Jev decides.
+   *
+   * 'evaluate' judges the game state against typed questions and returns a
+   * chosen option — the natural fit for an evaluation model, and it cannot
+   * name a move that does not exist. 'generate' asks a language model for a
+   * structured object instead.
+   */
+  mode: 'evaluate' | 'generate';
   /** Skip the model entirely and play with the built-in heuristics. */
   offline: boolean;
   /**
@@ -42,6 +51,7 @@ export function loadConfig(overrides: Partial<JevConfig> = {}): JevConfig {
     fallbacks,
     vision: process.env.JEV_VISION !== 'false',
     fairPlay: process.env.JEV_FAIR_PLAY === 'true',
+    mode: process.env.JEV_MODE === 'generate' ? 'generate' : 'evaluate',
     offline: false,
     temperature: process.env.JEV_TEMPERATURE ? Number(process.env.JEV_TEMPERATURE) : undefined,
     ...overrides,

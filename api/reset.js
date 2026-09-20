@@ -1733,6 +1733,7 @@ function loadConfig(overrides = {}) {
     fallbacks,
     vision: process.env.JEV_VISION !== "false",
     fairPlay: process.env.JEV_FAIR_PLAY === "true",
+    mode: process.env.JEV_MODE === "generate" ? "generate" : "evaluate",
     offline: false,
     temperature: process.env.JEV_TEMPERATURE ? Number(process.env.JEV_TEMPERATURE) : void 0,
     ...overrides
@@ -1763,6 +1764,12 @@ var ButtonPlanSchema = z2.object({
   ).min(1).max(6).describe("The button presses to perform now. Keep it short \u2014 you will see the result and can continue."),
   noteToSelf: z2.string().nullable().describe("A durable fact worth remembering (a location, a blocked path, an NPC), or null.")
 });
+
+// src/jev/evaluate-agent.ts
+import {
+  experimental_evaluate as evaluate,
+  Experimental_EvaluationUnsupportedQuestionTypeError as UnsupportedQuestionType
+} from "ai";
 
 // src/harness/turn.ts
 function analyzeIfBattle(state, config) {

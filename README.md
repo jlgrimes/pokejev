@@ -263,6 +263,40 @@ Progress is written to durable storage every `JEV_PERSIST_EVERY` turns (default
 position, same journal. The snapshot has the ROM stripped out of it, which is
 the difference between 3.3MB and 440KB per write.
 
+## How Jev decides
+
+`typesafe-ai/jev` is an **evaluation model**: it does not write prose, it judges
+one shared state against typed questions and returns a chosen option with a
+probability distribution. That fits playing a game better than free-form
+generation does — the state is the game, the question is which input to press.
+
+```
+state     → the battle, as structured data: HP, types, speed, precomputed
+            damage for every move, what the opponent can do back
+question  → "choose this turn's action"
+criteria  → one option per *legal* action:
+            move:1  "Use EMBER (FIRE). super-effective, about 27 damage —
+                     guaranteed knockout. 100% accurate, 25 PP left."
+            switch:1 "Switch to PIDGEY at 100% health. Costs a turn."
+            run      "Flee the battle, forfeiting any experience."
+answer    → { choice: "move:1", probabilities: { ... } }
+```
+
+The option set is built from the game state, so Jev cannot pick a move that is
+out of PP, switch to an empty slot, or flee a trainer battle — those are never
+offered. The SDK rejects any answer outside the criteria before it reaches the
+code that presses buttons.
+
+In the overworld it asks two questions at once: which button, and how many
+times to press it before looking again.
+
+The trade-off is that an evaluation model returns no reasoning, so the
+explanation in the viewer is reconstructed from the option chosen and how
+confident it was — "EMBER at 82% confidence — also weighed SCRATCH 15%".
+
+`JEV_MODE=generate` switches back to asking a language model for a structured
+object, which does return reasoning and can take screenshots.
+
 ## Speed
 
 The emulator runs at roughly 8x real time on its own, but capturing the picture
