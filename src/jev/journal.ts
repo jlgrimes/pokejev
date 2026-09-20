@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { StuckState } from '../harness/stuck.ts';
 
 /**
  * Jev's memory between turns.
@@ -12,6 +13,12 @@ export interface Journal {
   goal: string;
   notes: string[];
   recent: string[];
+  /**
+   * How long the game has looked identical. Lives here rather than in the
+   * runner so it survives a restart and works the same on the serverless
+   * path, where every request builds a fresh emulator.
+   */
+  stuck?: StuckState;
   stats: {
     turns: number;
     battlesEntered: number;

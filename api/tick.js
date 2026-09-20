@@ -261,9 +261,7 @@ async function openSession(id) {
   gb.loadRom(rom);
   const stored = await getStorage().read(sessionKey(id));
   if (!stored) {
-    gb.advance(600);
-    for (let i = 0; i < 6; i++) gb.press("START", { hold: 6, release: 30 });
-    gb.advance(120);
+    gb.advance(400);
     return { gb, journal: emptyJournal(), turns: 0, isNew: true };
   }
   const data = JSON.parse(gunzipSync(stored).toString("utf8"));
@@ -1786,6 +1784,40 @@ function providerOptions(config) {
   return config.fallbacks.length > 0 ? { gateway: { models: config.fallbacks } } : void 0;
 }
 
+// src/harness/stuck.ts
+var NUDGE_AFTER = 4;
+var SHAKE_AFTER = 10;
+var SHAKE_SEQUENCE = ["START", "B", "A", "B", "DOWN", "LEFT", "UP", "RIGHT"];
+function fingerprint(state) {
+  return [
+    state.mode,
+    state.world.map,
+    state.world.x,
+    state.world.y,
+    state.world.playerName,
+    state.world.party.map((mon) => `${mon.species}:${mon.level}:${mon.hp}`).join(","),
+    state.battle ? `${state.battle.enemy.species}:${state.battle.enemy.hp}` : "",
+    state.screen.flat
+  ].join("|");
+}
+function trackStuck(previous, state) {
+  const current = fingerprint(state);
+  const intro = previous?.intro ?? 0;
+  if (previous && previous.fingerprint === current) {
+    return { fingerprint: current, turns: previous.turns + 1, intro };
+  }
+  return { fingerprint: current, turns: 0, intro };
+}
+var INTRO_PATIENCE = 200;
+function shakeButton(turnsStuck) {
+  const offset = Math.max(0, turnsStuck - SHAKE_AFTER);
+  return SHAKE_SEQUENCE[offset % SHAKE_SEQUENCE.length];
+}
+function stuckWarning(turnsStuck) {
+  if (turnsStuck < NUDGE_AFTER) return null;
+  return `Nothing has changed on screen for ${turnsStuck} turns \u2014 whatever you have been pressing is not working. Try something different: a direction you have not tried, B to back out of a menu, or START.`;
+}
+
 // src/jev/prompts.ts
 var JEV_IDENTITY = `You are Jev, an AI playing Pokemon Red on a real Game Boy emulator.
 You are a competent, decisive player: you know Generation 1 mechanics, you read the
@@ -1863,8 +1895,11 @@ SCREEN:
 ${nonEmptyLines(state.screen).map((line) => `  | ${line}`).join("\n")}`;
 }
 function formatOverworldBriefing(state, journal) {
+  const warning = stuckWarning(journal.stuck?.turns ?? 0);
   return `OVERWORLD
-
+${warning ? `
+!! ${warning}
+` : ""}
 LOCATION: ${state.world.mapName} (map id ${state.world.map}) at tile x=${state.world.x}, y=${state.world.y}
 PLAYER: ${state.world.playerName || "(unnamed)"} | money \xA5${state.world.money} | badges: ${state.world.badges.join(", ") || "none"}
 
@@ -2057,7 +2092,9 @@ function resolveModel(deps, modelId) {
 }
 function battleState(state, analysis, journal) {
   const battle = state.battle;
+  const warning = stuckWarning(journal.stuck?.turns ?? 0);
   return {
+    ...warning ? { warning } : {},
     situation: `${battle.kind} battle in Pokemon Red`,
     generation1Rules: GEN1_NOTES,
     yourGoal: journal.goal,
@@ -2187,7 +2224,9 @@ var BUTTON_MEANINGS = {
 };
 var REPEAT_LEVELS = [1, 2, 4, 8];
 function overworldState(state, journal) {
+  const warning = stuckWarning(journal.stuck?.turns ?? 0);
   return {
+    ...warning ? { warning } : {},
     situation: "Walking around in Pokemon Red",
     yourGoal: journal.goal,
     location: state.world.mapName,
@@ -2268,6 +2307,46 @@ async function planOverworldByEvaluation(config, state, journal, deps = {}) {
   }
 }
 
+// src/game/intro.ts
+function detectIntroPhase(state) {
+  if (screenHas(state.screen, "NEW NAME")) return "naming";
+  if (state.screen.awaitingInput) {
+    return state.world.playerName.trim().length === 0 ? "text" : null;
+  }
+  if (screenHas(state.screen, "NEW GAME")) return "main-menu";
+  if (state.world.playerName.trim().length === 0) return "title";
+  return null;
+}
+function introInputs(phase) {
+  switch (phase) {
+    // DOWN moves off NEW NAME onto the first preset (RED, then BLUE for the
+    // rival); A takes it. Typing a name on the grid is many more presses and
+    // many more ways to get stuck.
+    case "naming":
+      return ["DOWN", "A"];
+    case "main-menu":
+      return ["A"];
+    case "text":
+      return ["A"];
+    // START skips the Game Freak intro, opens the menu from the title, and
+    // backs out of the attract demo. It is the right press for all three.
+    case "title":
+      return ["START"];
+  }
+}
+function describeIntroPhase(phase) {
+  switch (phase) {
+    case "naming":
+      return "choosing a name from the presets";
+    case "main-menu":
+      return "starting a new game";
+    case "text":
+      return "sitting through Oak's introduction";
+    case "title":
+      return "getting past the title screen";
+  }
+}
+
 // src/harness/turn.ts
 function analyzeIfBattle(state, config) {
   if (!state.battle) return null;
@@ -2275,6 +2354,41 @@ function analyzeIfBattle(state, config) {
 }
 async function takeTurn(params) {
   const { gb, controller, config, journal, state, analysis } = params;
+  journal.stuck = trackStuck(journal.stuck, state);
+  const stuckFor = journal.stuck.turns;
+  const introPhase = detectIntroPhase(state);
+  const introExhausted = (journal.stuck.intro ?? 0) > INTRO_PATIENCE;
+  journal.stuck.intro = introPhase ? (journal.stuck.intro ?? 0) + 1 : 0;
+  if (introPhase && !introExhausted) {
+    const buttons = introInputs(introPhase);
+    for (const button of buttons) controller.press(button);
+    return {
+      kind: "intro",
+      reasoning: `Not in the game yet: ${describeIntroPhase(introPhase)}.`,
+      action: buttons.join(" "),
+      detail: introPhase,
+      model: "(none)",
+      usedFallback: false,
+      latencyMs: 0,
+      stuckFor
+    };
+  }
+  if (stuckFor >= SHAKE_AFTER || introExhausted) {
+    const button = shakeButton(introExhausted ? journal.stuck.intro ?? 0 : stuckFor);
+    controller.press(button);
+    const why = introExhausted ? `the opening has run for ${journal.stuck.intro} turns without ending` : `nothing has changed for ${stuckFor} turns`;
+    addRecent(journal, `stuck: ${why}, tried ${button}`);
+    return {
+      kind: "stuck",
+      reasoning: `Giving up on the current approach \u2014 ${why}. Trying ${button} instead.`,
+      action: button,
+      detail: why,
+      model: "(none)",
+      usedFallback: true,
+      latencyMs: 0,
+      stuckFor
+    };
+  }
   if (state.screen.awaitingInput && !state.ui.battleMenuOpen) {
     const presses = controller.advanceText(6);
     return {
@@ -2284,12 +2398,13 @@ async function takeTurn(params) {
       detail: "",
       model: "(none)",
       usedFallback: false,
-      latencyMs: 0
+      latencyMs: 0,
+      stuckFor
     };
   }
   if (state.battle && analysis) {
     if (state.ui.battleMenuOpen) {
-      return takeBattleTurn({ controller, config, journal, state, analysis });
+      return takeBattleTurn({ controller, config, journal, state, analysis, stuckFor });
     }
     controller.waitFor((screen) => screen.awaitingInput || screen.flat.includes("FIGHT"), 180);
     return {
@@ -2299,13 +2414,14 @@ async function takeTurn(params) {
       detail: "",
       model: "(none)",
       usedFallback: false,
-      latencyMs: 0
+      latencyMs: 0,
+      stuckFor
     };
   }
-  return takeOverworldTurn({ gb, controller, config, journal, state });
+  return takeOverworldTurn({ gb, controller, config, journal, state, stuckFor });
 }
 async function takeBattleTurn(params) {
-  const { controller, config, journal, state, analysis } = params;
+  const { controller, config, journal, state, analysis, stuckFor } = params;
   const started = Date.now();
   const { decision, usedFallback, considered } = config.mode === "evaluate" && !config.offline ? await decideBattleByEvaluation(config, state, analysis, journal) : { ...await decideBattleAction(config, state, analysis, journal), considered: void 0 };
   const latencyMs = Date.now() - started;
@@ -2350,11 +2466,12 @@ async function takeBattleTurn(params) {
     model: config.battleModel,
     usedFallback,
     latencyMs,
+    stuckFor,
     ...considered ? { considered } : {}
   };
 }
 async function takeOverworldTurn(params) {
-  const { gb, controller, config, journal, state } = params;
+  const { gb, controller, config, journal, state, stuckFor } = params;
   const started = Date.now();
   const { plan, usedFallback, considered } = config.mode === "evaluate" && !config.offline ? await planOverworldByEvaluation(config, state, journal) : {
     ...await planOverworld(
@@ -2381,6 +2498,7 @@ async function takeOverworldTurn(params) {
     model: config.model,
     usedFallback,
     latencyMs,
+    stuckFor,
     ...considered ? { considered } : {}
   };
 }

@@ -8,6 +8,7 @@ import type { JevConfig } from '../jev/model.ts';
 import { saveJournal, type Journal } from '../jev/journal.ts';
 import { JevEvents, buildStateEvent } from './events.ts';
 import { FramePump } from './frame-pump.ts';
+import { SHAKE_AFTER } from './stuck.ts';
 import type { ViewerControls } from '../viewer/server.ts';
 
 export interface RunnerOptions {
@@ -51,6 +52,8 @@ export class JevRunner implements ViewerControls {
   /** Turns played since this process started; what `maxTurns` limits. */
   #turnsThisRun = 0;
   #wasInBattle = false;
+  /** So a wedge is reported once when it starts, not every turn after. */
+  #warnedStuckAt = 0;
 
   constructor(options: RunnerOptions) {
     this.#options = options;
@@ -132,6 +135,27 @@ export class JevRunner implements ViewerControls {
       analysis,
     });
     this.events.emit('decision', { ...outcome, turn: this.#turns });
+    this.#reportIfStuck(outcome.stuckFor);
+  }
+
+  /**
+   * Say something the first time a wedge gets serious, and again if it drags.
+   *
+   * Silence is what made the title-screen run so expensive: the turn counter
+   * kept climbing and nothing anywhere said the game had not moved.
+   */
+  #reportIfStuck(stuckFor: number): void {
+    if (stuckFor === 0) {
+      this.#warnedStuckAt = 0;
+      return;
+    }
+    if (stuckFor >= SHAKE_AFTER && stuckFor >= this.#warnedStuckAt + SHAKE_AFTER) {
+      this.#warnedStuckAt = stuckFor;
+      this.events.log(
+        'warn',
+        `Nothing has changed for ${stuckFor} turns — trying to shake the game loose.`,
+      );
+    }
   }
 
   // --- plumbing ----------------------------------------------------------
@@ -182,6 +206,7 @@ export class JevRunner implements ViewerControls {
       speed: this.#pump.speed,
       goal: this.#journal.goal,
       notes: this.#journal.notes,
+      stuckFor: this.#journal.stuck?.turns ?? 0,
       stats: this.#journal.stats as unknown as Record<string, number>,
     });
   }

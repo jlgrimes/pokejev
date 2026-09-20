@@ -35,10 +35,10 @@ export async function openSession(
 
   const stored = await getStorage().read(sessionKey(id));
   if (!stored) {
-    // A fresh run: boot past the copyright screen and the Game Freak intro.
-    gb.advance(600);
-    for (let i = 0; i < 6; i++) gb.press('START', { hold: 6, release: 30 });
-    gb.advance(120);
+    // A fresh run: only the boot animations. The title screen and the
+    // new-game menus are driven by the play loop, which checks the screen
+    // after every press rather than assuming a fixed sequence landed.
+    gb.advance(400);
     return { gb, journal: emptyJournal(), turns: 0, isNew: true };
   }
 

@@ -9,12 +9,14 @@ import {
   planOverworldByEvaluation,
   type Consideration,
 } from '../jev/evaluate-agent.ts';
+import { detectIntroPhase, introInputs, describeIntroPhase } from '../game/intro.ts';
+import { trackStuck, shakeButton, SHAKE_AFTER, INTRO_PATIENCE } from './stuck.ts';
 import { screenToPng } from '../emulator/png.ts';
 import type { JevConfig } from '../jev/model.ts';
 import { addNote, addRecent, type Journal } from '../jev/journal.ts';
 
 export interface TurnOutcome {
-  kind: 'battle' | 'overworld' | 'auto';
+  kind: 'battle' | 'overworld' | 'auto' | 'intro' | 'stuck';
   reasoning: string;
   action: string;
   detail: string;
@@ -26,6 +28,8 @@ export interface TurnOutcome {
    * Absent in generate mode, which returns prose instead of a distribution.
    */
   considered?: Consideration[];
+  /** Consecutive turns that have changed nothing. 0 when the game is moving. */
+  stuckFor: number;
 }
 
 /** Battle analysis for the current state, or null when we are not in a battle. */
@@ -52,6 +56,58 @@ export async function takeTurn(params: {
 }): Promise<TurnOutcome> {
   const { gb, controller, config, journal, state, analysis } = params;
 
+  // Has anything actually happened since last turn? Everything below needs to
+  // know, and a turn that is never asked cannot notice it is going nowhere.
+  journal.stuck = trackStuck(journal.stuck, state);
+  const stuckFor = journal.stuck.turns;
+
+  // The opening is mechanics, not judgement: title screen, NEW GAME, and the
+  // two name pickers each have one right answer. Driving them in code is what
+  // keeps a run from sitting on the title screen forever while its goal still
+  // reads "get out of the house".
+  const introPhase = detectIntroPhase(state);
+  // An intro that never ends is a detector that is wrong, and it would never
+  // trip the check above: pressing START at the title screen opens and closes
+  // the menu, so the screen keeps changing while nothing progresses.
+  const introExhausted = (journal.stuck.intro ?? 0) > INTRO_PATIENCE;
+  journal.stuck.intro = introPhase ? (journal.stuck.intro ?? 0) + 1 : 0;
+
+  if (introPhase && !introExhausted) {
+    const buttons = introInputs(introPhase);
+    for (const button of buttons) controller.press(button);
+    return {
+      kind: 'intro',
+      reasoning: `Not in the game yet: ${describeIntroPhase(introPhase)}.`,
+      action: buttons.join(' '),
+      detail: introPhase,
+      model: '(none)',
+      usedFallback: false,
+      latencyMs: 0,
+      stuckFor,
+    };
+  }
+
+  // Either the decision is demonstrably not working, or the opening has run
+  // far past any plausible length. Stop paying for advice and try things.
+  if (stuckFor >= SHAKE_AFTER || introExhausted) {
+    const button = shakeButton(introExhausted ? journal.stuck.intro ?? 0 : stuckFor);
+    controller.press(button);
+    const why = introExhausted
+      ? `the opening has run for ${journal.stuck.intro} turns without ending`
+      : `nothing has changed for ${stuckFor} turns`;
+    addRecent(journal, `stuck: ${why}, tried ${button}`);
+    return {
+      kind: 'stuck',
+      reasoning: `Giving up on the current approach — ${why}. Trying ${button} instead.`,
+      action: button,
+      detail: why,
+      model: '(none)',
+      usedFallback: true,
+      latencyMs: 0,
+      stuckFor,
+    };
+  }
+
   // Text boxes and animations need no judgement, so they cost no model call.
   if (state.screen.awaitingInput && !state.ui.battleMenuOpen) {
     const presses = controller.advanceText(6);
@@ -63,12 +119,13 @@ export async function takeTurn(params: {
       model: '(none)',
       usedFallback: false,
       latencyMs: 0,
+      stuckFor,
     };
   }
 
   if (state.battle && analysis) {
     if (state.ui.battleMenuOpen) {
-      return takeBattleTurn({ controller, config, journal, state, analysis });
+      return takeBattleTurn({ controller, config, journal, state, analysis, stuckFor });
     }
     // Mid-battle animation or message: wait for the menu to come back.
     controller.waitFor((screen) => screen.awaitingInput || screen.flat.includes('FIGHT'), 180);
@@ -80,10 +137,11 @@ export async function takeTurn(params: {
       model: '(none)',
       usedFallback: false,
       latencyMs: 0,
+      stuckFor,
     };
   }
 
-  return takeOverworldTurn({ gb, controller, config, journal, state });
+  return takeOverworldTurn({ gb, controller, config, journal, state, stuckFor });
 }
 
 async function takeBattleTurn(params: {
@@ -92,8 +150,9 @@ async function takeBattleTurn(params: {
   journal: Journal;
   state: GameState;
   analysis: BattleAnalysis;
+  stuckFor: number;
 }): Promise<TurnOutcome> {
-  const { controller, config, journal, state, analysis } = params;
+  const { controller, config, journal, state, analysis, stuckFor } = params;
   const started = Date.now();
   const { decision, usedFallback, considered } =
     config.mode === 'evaluate' && !config.offline
@@ -150,6 +209,7 @@ async function takeBattleTurn(params: {
     model: config.battleModel,
     usedFallback,
     latencyMs,
+    stuckFor,
     ...(considered ? { considered } : {}),
   };
 }
@@ -160,8 +220,9 @@ async function takeOverworldTurn(params: {
   config: JevConfig;
   journal: Journal;
   state: GameState;
+  stuckFor: number;
 }): Promise<TurnOutcome> {
-  const { gb, controller, config, journal, state } = params;
+  const { gb, controller, config, journal, state, stuckFor } = params;
   const started = Date.now();
   // An evaluation model takes structured state, not pictures, so the
   // screenshot is only built for the generative path that can use it.
@@ -199,6 +260,7 @@ async function takeOverworldTurn(params: {
     model: config.model,
     usedFallback,
     latencyMs,
+    stuckFor,
     ...(considered ? { considered } : {}),
   };
 }

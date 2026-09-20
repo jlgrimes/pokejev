@@ -72,6 +72,11 @@
   .party { display: grid; gap: 8px; }
   .party .mon { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
   .party .fainted { opacity: 0.45; }
+  .pill.stuck { color: var(--danger); border-color: var(--danger); }
+  .thought.intro { border-left-color: var(--dim); }
+  .thought.intro .action { color: var(--dim); }
+  .thought.stuck { border-left-color: var(--danger); }
+  .thought.stuck .action { color: var(--danger); }
   /* How Jev weighed its options: the distribution it actually decided from. */
   .odds { display: grid; gap: 5px; }
   .odds .opt {
@@ -132,6 +137,7 @@
   <span class="pill" id="conn">loading…</span>
   <span class="pill" id="turns">turn 0</span>
   <span class="pill" id="where">—</span>
+  <span class="pill stuck" id="stuck" hidden></span>
   <span class="pill" id="model">—</span>
 </header>
 
@@ -353,12 +359,21 @@ function showOdds(d) {
     (d.detail ? ' ' + esc(d.detail) : '');
 }
 
+/** Say so when the game has stopped moving; a climbing turn count is not progress. */
+function showStuck(turns) {
+  const pill = $('stuck');
+  if (!turns) { pill.hidden = true; return; }
+  pill.hidden = false;
+  pill.textContent = 'stuck ' + turns + ' turns';
+}
+
 function addThought(d) {
   if (!d) return;
+  showStuck(d.stuckFor);
   const list = $('thoughts');
   if (list.querySelector('.empty')) list.innerHTML = '';
   const el = document.createElement('div');
-  el.className = 'thought' + (d.usedFallback ? ' fallback' : '');
+  el.className = 'thought ' + (d.kind === 'intro' || d.kind === 'stuck' ? d.kind : d.usedFallback ? 'fallback' : '');
   el.innerHTML = `
     <div class="meta">
       <span>turn ${d.turn}</span><span>${esc(d.kind)}</span>

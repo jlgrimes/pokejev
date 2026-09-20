@@ -39,7 +39,7 @@ export interface StateEvent {
 }
 
 export interface DecisionEvent {
-  kind: 'battle' | 'overworld' | 'auto';
+  kind: 'battle' | 'overworld' | 'auto' | 'intro' | 'stuck';
   reasoning: string;
   action: string;
   detail?: string;
@@ -49,6 +49,8 @@ export interface DecisionEvent {
   turn: number;
   /** What Jev weighed, when it decided as an evaluation model. */
   considered?: Consideration[];
+  /** Consecutive turns that changed nothing on screen. */
+  stuckFor?: number;
 }
 
 export interface LogEvent {
@@ -65,6 +67,8 @@ export interface StatusEvent {
   goal: string;
   notes: string[];
   stats: Record<string, number>;
+  /** Consecutive turns that changed nothing, so a watcher can see a wedge. */
+  stuckFor?: number;
 }
 
 export interface JevEventMap {

@@ -249,9 +249,7 @@ async function openSession(id) {
   gb.loadRom(rom);
   const stored = await getStorage().read(sessionKey(id));
   if (!stored) {
-    gb.advance(600);
-    for (let i = 0; i < 6; i++) gb.press("START", { hold: 6, release: 30 });
-    gb.advance(120);
+    gb.advance(400);
     return { gb, journal: emptyJournal(), turns: 0, isNew: true };
   }
   const data = JSON.parse(gunzipSync(stored).toString("utf8"));

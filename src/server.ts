@@ -130,10 +130,10 @@ async function startPlaying(rom: Buffer): Promise<void> {
     if (savedJournal) journal = { ...emptyJournal(), ...JSON.parse(savedJournal.toString('utf8')) };
     console.log(`Resumed at turn ${journal.stats.turns} (frame ${gb.frameCount})`);
   } else {
-    // Fresh cartridge: boot past the copyright screen and the Game Freak intro.
-    gb.advance(600);
-    for (let i = 0; i < 6; i++) gb.press('START', { hold: 6, release: 30 });
-    gb.advance(120);
+    // Fresh cartridge. Only let the boot animations run — the title screen,
+    // NEW GAME and the name pickers are handled by the play loop, closed-loop,
+    // so a press that does not land is retried rather than assumed.
+    gb.advance(400);
     console.log('Started a new game');
   }
 

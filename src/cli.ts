@@ -168,10 +168,9 @@ async function commandPlay(offline: boolean): Promise<void> {
     gb.readStateFile(STATE_PATH);
     console.log(`Resumed from save state ${STATE_PATH} (frame ${gb.frameCount})`);
   } else {
-    // Boot past the copyright screen and the Game Freak intro.
-    gb.advance(600);
-    for (let i = 0; i < 6; i++) gb.press('START', { hold: 6, release: 30 });
-    gb.advance(120);
+    // Only the boot animations; the play loop drives the title screen and the
+    // new-game menus itself, checking the screen after every press.
+    gb.advance(400);
   }
 
   const journal = values.fresh ? emptyJournal() : loadJournal(JOURNAL_PATH);

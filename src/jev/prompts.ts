@@ -1,6 +1,7 @@
 import type { GameState } from '../game/state.ts';
 import type { BattleAnalysis } from '../game/battle.ts';
 import type { Journal } from './journal.ts';
+import { stuckWarning } from '../harness/stuck.ts';
 import { nonEmptyLines } from '../game/screen.ts';
 import { BATTLE_ITEMS } from '../game/data/items.ts';
 
@@ -107,8 +108,9 @@ ${nonEmptyLines(state.screen).map((line) => `  | ${line}`).join('\n')}`;
 
 /** The overworld briefing: where we are, what's on screen, what we were doing. */
 export function formatOverworldBriefing(state: GameState, journal: Journal): string {
+  const warning = stuckWarning(journal.stuck?.turns ?? 0);
   return `OVERWORLD
-
+${warning ? `\n!! ${warning}\n` : ''}
 LOCATION: ${state.world.mapName} (map id ${state.world.map}) at tile x=${state.world.x}, y=${state.world.y}
 PLAYER: ${state.world.playerName || '(unnamed)'} | money ¥${state.world.money} | badges: ${state.world.badges.join(', ') || 'none'}
 

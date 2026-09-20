@@ -23,6 +23,8 @@ and presses the buttons itself — and you can watch it play in your browser.
 `npm run play` starts a local viewer at **http://localhost:8080** showing:
 
 - the Game Boy screen, streamed at 30fps
+- a **stuck** badge in the header the moment the game stops moving — a climbing
+  turn counter is not progress, and nothing else tells them apart
 - **how Jev is weighing it** — a live bar per option it was offered, showing the
   probability it gave each one and which it took. In evaluation mode this is
   not a paraphrase of a decision, it *is* the decision: a 51/49 call looks
@@ -34,6 +36,31 @@ and presses the buttons itself — and you can watch it play in your browser.
 - party HP, badges, money, location, and the exact text on screen
 - **controls**: pause, step one decision at a time, or take over with the D-pad
   (arrow keys, `Z`/`X` for A/B, Enter for Start, Space to pause)
+
+## Getting into the game
+
+The opening is driven by code, not by Jev: the title screen, the NEW GAME menu
+and the two name pickers each have exactly one right answer, and asking a model
+to find them means paying for a decision that can also be got wrong.
+
+It is closed-loop — look at the screen, take the one step that phase needs,
+look again — because the alternative is a fixed sequence of presses that is
+silently wrong the first time an animation runs a frame long:
+
+| what's on screen | what the harness does |
+| --- | --- |
+| copyright, Game Freak intro, title, attract demo | `START` |
+| `NEW GAME` / `OPTION` | `A` |
+| `NEW NAME` / `RED` / `ASH` / `JACK` | `DOWN`, `A` — take a preset |
+| a text box, still unnamed | `A` |
+| named, no menu | hand over to Jev |
+
+Two things stop this running away. Every turn fingerprints the game state (map,
+position, party, screen text); four identical turns in a row and the model is
+told it is repeating itself, ten and the harness stops asking and starts trying
+buttons. And because a wrong intro detector would press START at a title screen
+forever — opening and closing the menu, so the screen keeps *changing* — the
+opening itself is capped at 200 turns.
 
 ## Setup
 

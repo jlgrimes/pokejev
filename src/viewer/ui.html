@@ -73,6 +73,11 @@
   .party { display: grid; gap: 8px; }
   .party .mon { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
   .party .fainted { opacity: 0.45; }
+  .pill.stuck { color: var(--danger); border-color: var(--danger); }
+  .thought.intro { border-left-color: var(--dim); }
+  .thought.intro .action { color: var(--dim); }
+  .thought.stuck { border-left-color: var(--danger); }
+  .thought.stuck .action { color: var(--danger); }
   /* How Jev weighed its options: the distribution it actually decided from. */
   .odds { display: grid; gap: 5px; }
   .odds .opt {
@@ -126,6 +131,7 @@
   <span class="pill" id="conn">connecting…</span>
   <span class="pill" id="turns">turn 0</span>
   <span class="pill" id="where">—</span>
+  <span class="pill stuck" id="stuck" hidden></span>
 </header>
 
 <main>
@@ -230,6 +236,19 @@ const hpClass = (pct) => (pct > 50 ? '' : pct > 20 ? 'mid' : 'low');
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 
 let paused = false;
+
+/**
+ * Say so when the game has stopped moving.
+ *
+ * A climbing turn counter looks like progress, which is exactly how a run can
+ * spend thousands of turns on the title screen without anyone noticing.
+ */
+function showStuck(turns) {
+  const pill = $('stuck');
+  if (!turns) { pill.hidden = true; return; }
+  pill.hidden = false;
+  pill.textContent = 'stuck ' + turns + ' turns';
+}
 const source = new EventSource('/events');
 
 source.onopen = () => { $('conn').textContent = 'live'; $('conn').className = 'pill live'; };
@@ -247,6 +266,7 @@ source.addEventListener('status', (e) => {
   $('pause').textContent = s.paused ? 'Resume' : 'Pause';
   $('turns').textContent = 'turn ' + s.turns;
   $('goal').textContent = s.goal || '—';
+  showStuck(s.stuckFor);
   if (s.speed) {
     for (const button of document.querySelectorAll('[data-speed]')) {
       button.classList.toggle('on', Number(button.dataset.speed) === s.speed);
@@ -349,7 +369,7 @@ source.addEventListener('decision', (e) => {
   const list = $('thoughts');
   if (list.querySelector('.empty')) list.innerHTML = '';
   const el = document.createElement('div');
-  el.className = 'thought' + (d.usedFallback ? ' fallback' : '');
+  el.className = 'thought ' + (d.kind === 'intro' || d.kind === 'stuck' ? d.kind : d.usedFallback ? 'fallback' : '');
   el.innerHTML = `
     <div class="meta">
       <span>turn ${d.turn}</span><span>${esc(d.kind)}</span>

@@ -10,6 +10,7 @@ import { createJevGateway, providerOptions, type JevConfig } from './model.ts';
 import { fallbackBattleDecision, type BattleDecision } from './battle-agent.ts';
 import { fallbackButtonPlan, type ButtonPlan } from './overworld-agent.ts';
 import { addNote, type Journal } from './journal.ts';
+import { stuckWarning } from '../harness/stuck.ts';
 
 /**
  * Jev as an evaluation model.
@@ -116,7 +117,9 @@ function resolveModel(deps: EvaluateDeps, modelId: string) {
 /** Everything the model judges against, as structured data rather than prose. */
 function battleState(state: GameState, analysis: BattleAnalysis, journal: Journal) {
   const battle = state.battle!;
+  const warning = stuckWarning(journal.stuck?.turns ?? 0);
   return {
+    ...(warning ? { warning } : {}),
     situation: `${battle.kind} battle in Pokemon Red`,
     generation1Rules: GEN1_NOTES,
     yourGoal: journal.goal,
@@ -290,7 +293,9 @@ const BUTTON_MEANINGS: Record<Button, string> = {
 const REPEAT_LEVELS = [1, 2, 4, 8];
 
 function overworldState(state: GameState, journal: Journal) {
+  const warning = stuckWarning(journal.stuck?.turns ?? 0);
   return {
+    ...(warning ? { warning } : {}),
     situation: 'Walking around in Pokemon Red',
     yourGoal: journal.goal,
     location: state.world.mapName,
