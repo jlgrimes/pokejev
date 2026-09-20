@@ -269,8 +269,8 @@ Jev's brain is one env var. Any gateway model works, and battles can use a
 different (usually stronger) model than overworld navigation:
 
 ```bash
-JEV_MODEL=anthropic/claude-sonnet-5
-JEV_BATTLE_MODEL=anthropic/claude-opus-5
+JEV_MODEL=typesafe-ai/jev
+JEV_BATTLE_MODEL=typesafe-ai/jev
 JEV_FALLBACK_MODELS=openai/gpt-5.6-sol,google/gemini-3.1-pro-preview
 ```
 

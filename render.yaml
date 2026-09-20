@@ -8,9 +8,9 @@ services:
     healthCheckPath: /healthz
     envVars:
       - key: JEV_MODEL
-        value: jev
+        value: typesafe-ai/jev
       - key: JEV_BATTLE_MODEL
-        value: jev
+        value: typesafe-ai/jev
       - key: JEV_VISION
         value: 'true'
       # Required: nothing outside Vercel can use the OIDC token, so the
