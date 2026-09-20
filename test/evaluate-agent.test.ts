@@ -236,3 +236,109 @@ describe('the overworld as an evaluation', () => {
     assert.ok(['A', 'DOWN'].includes(plan.inputs[0]!.button));
   });
 });
+
+describe('what the viewer gets to watch', () => {
+  /** Spread the remaining probability over whatever the agent offered. */
+  function distributionFavouring(weights: Record<string, number>) {
+    return (captured: Captured) => {
+      const keys = Object.keys(captured.questions.action.criteria);
+      const used = Object.values(weights).reduce((sum, value) => sum + value, 0);
+      const rest = keys.filter((key) => !(key in weights));
+      const spare = rest.length > 0 ? (1 - used) / rest.length : 0;
+      return {
+        action: {
+          type: 'choice',
+          choice: Object.keys(weights)[0]!,
+          probabilities: Object.fromEntries(keys.map((key) => [key, weights[key] ?? spare])),
+        },
+      };
+    };
+  }
+
+  test('reports every option it weighed, strongest first', async () => {
+    const { state, analysis } = battleFixture();
+    const { agent, calls, deps } = await withFakeModel(
+      distributionFavouring({ 'move:1': 0.8, 'move:0': 0.15 }),
+    );
+
+    const { considered } = await agent.decideBattleByEvaluation(
+      config(), state, analysis, emptyJournal(), deps,
+    );
+
+    assert.ok(considered, 'an evaluation always has a distribution to show');
+    // Every offered option appears, so the bars add up to the whole decision.
+    assert.equal(considered.length, Object.keys(calls[0]!.questions.action.criteria).length);
+    assert.deepEqual(
+      considered.map((option) => option.probability),
+      [...considered.map((option) => option.probability)].sort((a, b) => b! - a!),
+      'sorted so the bar chart reads top-down',
+    );
+    const top = considered[0]!;
+    assert.equal(top.key, 'move:1');
+    assert.equal(top.label, 'EMBER', 'labelled for a human, not by option key');
+    assert.equal(top.chosen, true);
+    assert.equal(considered.filter((option) => option.chosen).length, 1);
+    assert.equal(considered.find((option) => option.key === 'run')!.chosen, false);
+  });
+
+  test('an answer without a distribution still lists the options', async () => {
+    const { state, analysis } = battleFixture();
+    const { agent, deps } = await withFakeModel(() => ({
+      action: { type: 'choice', choice: 'move:1' },
+    }));
+
+    const { considered } = await agent.decideBattleByEvaluation(
+      config(), state, analysis, emptyJournal(), deps,
+    );
+
+    assert.ok(considered);
+    // Null rather than zero: the viewer draws no bar instead of an empty one.
+    assert.ok(considered.every((option) => option.probability === null));
+    assert.equal(considered.find((option) => option.chosen)!.key, 'move:1');
+  });
+
+  test('a fallback has nothing to show, and says so by omission', async () => {
+    const { state, analysis } = battleFixture();
+    const { agent, deps } = await withFakeModel(() => {
+      throw new Error('gateway exploded');
+    });
+
+    const result = await agent.decideBattleByEvaluation(
+      config(), state, analysis, emptyJournal(), deps,
+    );
+    assert.equal(result.usedFallback, true);
+    assert.equal(result.considered, undefined);
+  });
+
+  test('walking around is weighed the same way', async () => {
+    const gb = new FakeGameBoy();
+    gb.fillScreen();
+    gb.writeByte(ADDR.wCurMap, 0x00);
+    const state = readGameState(gb.asGameBoy());
+
+    const { agent, deps } = await withFakeModel((captured) => {
+      const keys = Object.keys(captured.questions.button.criteria);
+      const spare = (1 - 0.65) / (keys.length - 1);
+      return {
+        button: {
+          type: 'choice',
+          choice: 'UP',
+          probabilities: Object.fromEntries(
+            keys.map((key) => [key, key === 'UP' ? 0.65 : spare]),
+          ),
+        },
+        repeat: { type: 'score', score: 0 },
+      };
+    });
+
+    const { considered } = await agent.planOverworldByEvaluation(
+      config(), state, emptyJournal(), deps,
+    );
+
+    assert.ok(considered);
+    assert.equal(considered.length, 8, 'one bar per Game Boy button');
+    assert.equal(considered[0]!.label, 'UP');
+    assert.equal(considered[0]!.chosen, true);
+    assert.ok(Math.abs(considered[0]!.probability! - 0.65) < 1e-9);
+  });
+});

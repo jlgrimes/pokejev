@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { GameState } from '../game/state.ts';
 import type { BattleAnalysis } from '../game/battle.ts';
 import { nonEmptyLines } from '../game/screen.ts';
+import type { Consideration } from '../jev/evaluate-agent.ts';
 
 export interface FrameEvent {
   frame: number;
@@ -46,6 +47,8 @@ export interface DecisionEvent {
   usedFallback: boolean;
   latencyMs: number;
   turn: number;
+  /** What Jev weighed, when it decided as an evaluation model. */
+  considered?: Consideration[];
 }
 
 export interface LogEvent {

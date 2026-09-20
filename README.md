@@ -23,6 +23,10 @@ and presses the buttons itself — and you can watch it play in your browser.
 `npm run play` starts a local viewer at **http://localhost:8080** showing:
 
 - the Game Boy screen, streamed at 30fps
+- **how Jev is weighing it** — a live bar per option it was offered, showing the
+  probability it gave each one and which it took. In evaluation mode this is
+  not a paraphrase of a decision, it *is* the decision: a 51/49 call looks
+  visibly different from a foregone one, and you can watch Jev waver.
 - **what Jev is thinking** — every decision with its reasoning, the model that
   made it, and how long it took
 - the **battle table**: every move with its real Gen 1 damage estimate, type
@@ -290,12 +294,15 @@ code that presses buttons.
 In the overworld it asks two questions at once: which button, and how many
 times to press it before looking again.
 
-The trade-off is that an evaluation model returns no reasoning, so the
-explanation in the viewer is reconstructed from the option chosen and how
-confident it was — "EMBER at 82% confidence — also weighed SCRATCH 15%".
+An evaluation model returns no prose, so there is no story to read. What comes
+back instead is the distribution it judged from, which the viewer draws as bars
+and summarises in one line — "EMBER at 82% confidence — also weighed SCRATCH
+15%". That is arguably the better thing to watch: prose is a claim about the
+reasoning, the distribution is the reasoning.
 
 `JEV_MODE=generate` switches back to asking a language model for a structured
-object, which does return reasoning and can take screenshots.
+object, which does return prose and can take screenshots, but gives you no
+numbers to check it against.
 
 ## Speed
 

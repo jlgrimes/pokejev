@@ -33,6 +33,45 @@ const GEN1_NOTES = [
   'Struggle is what you get when every move is out of PP.',
 ];
 
+/**
+ * Every option Jev was offered, with how much weight it gave each one.
+ *
+ * This is the thing worth watching. A generative model tells you a story about
+ * why it did something, which you cannot check; an evaluation model hands you
+ * the actual distribution it decided from. Shown as bars next to the move
+ * table, a 51/49 call looks visibly different from a 99/1 one, and you can see
+ * Jev waver before it loses a Pokemon.
+ */
+export interface Consideration {
+  /** The option key, e.g. `move:2` — stable, for anything that wants to match. */
+  key: string;
+  /** What to show a human, e.g. `EMBER`. */
+  label: string;
+  /** 0-1, or null when the model answered without a distribution. */
+  probability: number | null;
+  chosen: boolean;
+}
+
+/** Pair every option with its weight, best first. */
+function weigh(
+  chosen: string,
+  keys: string[],
+  label: (key: string) => string,
+  probabilities?: Record<string, number>,
+): Consideration[] {
+  // The answer should always be one of ours, but a distribution that mentions
+  // something else is still worth showing rather than silently dropping.
+  const all = [...new Set([...keys, ...Object.keys(probabilities ?? {})])];
+  return all
+    .map((key) => ({
+      key,
+      label: label(key),
+      probability: probabilities?.[key] ?? null,
+      chosen: key === chosen,
+    }))
+    .sort((a, b) => (b.probability ?? -1) - (a.probability ?? -1));
+}
+
 /** Turn a probability distribution into something a human can read. */
 function explain(
   chosen: string,
@@ -152,7 +191,7 @@ export async function decideBattleByEvaluation(
   analysis: BattleAnalysis,
   journal: Journal,
   deps: EvaluateDeps = {},
-): Promise<{ decision: BattleDecision; usedFallback: boolean }> {
+): Promise<{ decision: BattleDecision; usedFallback: boolean; considered?: Consideration[] }> {
   const criteria = battleCriteria(state, analysis);
   if (Object.keys(criteria).length === 0) {
     return { decision: fallbackBattleDecision(analysis), usedFallback: true };
@@ -177,9 +216,15 @@ export async function decideBattleByEvaluation(
     });
 
     const answer = result.answers.action;
+    const label = (key: string) => describeKey(key, analysis);
     return {
-      decision: toBattleDecision(answer.choice, analysis, explain(answer.choice, (key) => describeKey(key, analysis), answer.probabilities)),
+      decision: toBattleDecision(
+        answer.choice,
+        analysis,
+        explain(answer.choice, label, answer.probabilities),
+      ),
       usedFallback: false,
+      considered: weigh(answer.choice, Object.keys(criteria), label, answer.probabilities),
     };
   } catch (error) {
     console.error(`[jev] battle evaluation failed, falling back: ${(error as Error).message}`);
@@ -271,7 +316,7 @@ export async function planOverworldByEvaluation(
   state: GameState,
   journal: Journal,
   deps: EvaluateDeps = {},
-): Promise<{ plan: ButtonPlan; usedFallback: boolean }> {
+): Promise<{ plan: ButtonPlan; usedFallback: boolean; considered?: Consideration[] }> {
   const criteria = Object.fromEntries(
     BUTTONS.map((button) => [button, BUTTON_MEANINGS[button]]),
   ) as Record<string, string>;
@@ -330,6 +375,12 @@ export async function planOverworldByEvaluation(
         noteToSelf: null,
       },
       usedFallback: false,
+      considered: weigh(
+        answers.button.choice,
+        BUTTONS as readonly string[] as string[],
+        (key) => key,
+        answers.button.probabilities,
+      ),
     };
   } catch (error) {
     console.error(`[jev] overworld evaluation failed, falling back: ${(error as Error).message}`);

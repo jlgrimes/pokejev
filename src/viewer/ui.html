@@ -73,6 +73,25 @@
   .party { display: grid; gap: 8px; }
   .party .mon { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
   .party .fainted { opacity: 0.45; }
+  /* How Jev weighed its options: the distribution it actually decided from. */
+  .odds { display: grid; gap: 5px; }
+  .odds .opt {
+    display: grid; grid-template-columns: minmax(84px, 30%) 1fr 44px;
+    gap: 8px; align-items: center; font-size: 12px; color: var(--dim);
+  }
+  .odds .opt .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .odds .opt.picked .name, .odds .opt.picked .pct { color: var(--accent); font-weight: 600; }
+  .odds .track { height: 8px; border-radius: 4px; background: #2a323c; overflow: hidden; }
+  .odds .track i {
+    display: block; height: 100%; background: var(--accent-dim);
+    transition: width .25s ease;
+  }
+  .odds .opt.picked .track i { background: var(--accent); }
+  .odds .pct { text-align: right; font-variant-numeric: tabular-nums; }
+  .odds.mini .opt { grid-template-columns: minmax(70px, 34%) 1fr 38px; font-size: 11px; }
+  .odds.mini .track { height: 5px; }
+  #odds-head { color: var(--dim); font-size: 11px; margin-bottom: 8px; }
+  #odds-head b { color: var(--accent); }
   #thoughts { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
   .thought { border-left: 2px solid var(--accent-dim); padding-left: 10px; }
   .thought .meta { color: var(--dim); font-size: 11px; display: flex; gap: 8px; flex-wrap: wrap; }
@@ -182,6 +201,12 @@
       <div class="row" id="threats" style="margin-top:10px"></div>
     </div>
 
+    <div class="panel" id="odds-panel" hidden>
+      <h2>How Jev is weighing it</h2>
+      <div id="odds-head"></div>
+      <div class="odds" id="odds"></div>
+    </div>
+
     <div class="panel">
       <h2>What Jev is thinking</h2>
       <div id="thoughts"><span class="empty">waiting for Jev's first decision…</span></div>
@@ -287,6 +312,38 @@ source.addEventListener('state', (e) => {
     : '';
 });
 
+/**
+ * Render a decision's probability distribution.
+ *
+ * An evaluation model does not narrate — it weighs. So rather than a story
+ * told after the fact, this is the distribution Jev actually decided from: a
+ * near 50/50 call and a foregone conclusion look completely different here.
+ */
+function oddsRows(considered) {
+  if (!considered) return '';
+  const known = considered.filter((c) => c.probability !== null && c.probability !== undefined);
+  if (!known.length) return '';
+  return known.slice(0, 8).map((c) => {
+    const pct = c.probability * 100;
+    return `<div class="opt ${c.chosen ? 'picked' : ''}">
+      <span class="name" title="${esc(c.label)}">${esc(c.label)}</span>
+      <span class="track"><i style="width:${pct.toFixed(1)}%"></i></span>
+      <span class="pct">${pct > 0 && pct < 1 ? '&lt;1' : Math.round(pct)}%</span>
+    </div>`;
+  }).join('');
+}
+
+/** Keep the standalone panel showing the most recent weighed decision. */
+function showOdds(d) {
+  const rows = oddsRows(d.considered);
+  if (!rows) return;
+  $('odds-panel').hidden = false;
+  $('odds').innerHTML = rows;
+  $('odds-head').innerHTML =
+    `turn ${d.turn} · ${esc(d.kind)} · picked <b>${esc(d.action)}</b>` +
+    (d.detail ? ' ' + esc(d.detail) : '');
+}
+
 source.addEventListener('decision', (e) => {
   const d = JSON.parse(e.data);
   const list = $('thoughts');
@@ -300,9 +357,11 @@ source.addEventListener('decision', (e) => {
       ${d.usedFallback ? '<span>fallback</span>' : ''}
     </div>
     <div class="action">${esc(d.action)}${d.detail ? ' — ' + esc(d.detail) : ''}</div>
-    <div>${esc(d.reasoning)}</div>`;
+    <div>${esc(d.reasoning)}</div>
+    ${oddsRows(d.considered) ? `<div class="odds mini" style="margin-top:6px">${oddsRows(d.considered)}</div>` : ''}`;
   list.prepend(el);
   while (list.children.length > 40) list.lastChild.remove();
+  showOdds(d);
 });
 
 source.addEventListener('log', (e) => {

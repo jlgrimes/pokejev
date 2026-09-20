@@ -2035,6 +2035,15 @@ var GEN1_NOTES = [
   "Psychic is dominant; very little resists it.",
   "Struggle is what you get when every move is out of PP."
 ];
+function weigh(chosen, keys, label, probabilities) {
+  const all = [.../* @__PURE__ */ new Set([...keys, ...Object.keys(probabilities ?? {})])];
+  return all.map((key) => ({
+    key,
+    label: label(key),
+    probability: probabilities?.[key] ?? null,
+    chosen: key === chosen
+  })).sort((a, b) => (b.probability ?? -1) - (a.probability ?? -1));
+}
 function explain(chosen, label, probabilities) {
   if (!probabilities) return `Chose ${label(chosen)}.`;
   const ranked = Object.entries(probabilities).filter(([, p]) => p > 0.01).sort(([, a], [, b]) => b - a).slice(0, 4);
@@ -2117,9 +2126,15 @@ async function decideBattleByEvaluation(config, state, analysis, journal, deps =
       ...providerOptions(config) ? { providerOptions: providerOptions(config) } : {}
     });
     const answer = result.answers.action;
+    const label = (key) => describeKey(key, analysis);
     return {
-      decision: toBattleDecision(answer.choice, analysis, explain(answer.choice, (key) => describeKey(key, analysis), answer.probabilities)),
-      usedFallback: false
+      decision: toBattleDecision(
+        answer.choice,
+        analysis,
+        explain(answer.choice, label, answer.probabilities)
+      ),
+      usedFallback: false,
+      considered: weigh(answer.choice, Object.keys(criteria), label, answer.probabilities)
     };
   } catch (error) {
     console.error(`[jev] battle evaluation failed, falling back: ${error.message}`);
@@ -2239,7 +2254,13 @@ async function planOverworldByEvaluation(config, state, journal, deps = {}) {
         inputs: [{ button, repeat: REPEAT_LEVELS[level] }],
         noteToSelf: null
       },
-      usedFallback: false
+      usedFallback: false,
+      considered: weigh(
+        answers.button.choice,
+        BUTTONS,
+        (key) => key,
+        answers.button.probabilities
+      )
     };
   } catch (error) {
     console.error(`[jev] overworld evaluation failed, falling back: ${error.message}`);
@@ -2286,7 +2307,7 @@ async function takeTurn(params) {
 async function takeBattleTurn(params) {
   const { controller, config, journal, state, analysis } = params;
   const started = Date.now();
-  const { decision, usedFallback } = config.mode === "evaluate" && !config.offline ? await decideBattleByEvaluation(config, state, analysis, journal) : await decideBattleAction(config, state, analysis, journal);
+  const { decision, usedFallback, considered } = config.mode === "evaluate" && !config.offline ? await decideBattleByEvaluation(config, state, analysis, journal) : { ...await decideBattleAction(config, state, analysis, journal), considered: void 0 };
   const latencyMs = Date.now() - started;
   let detail = "";
   let executed = false;
@@ -2328,13 +2349,22 @@ async function takeBattleTurn(params) {
     detail,
     model: config.battleModel,
     usedFallback,
-    latencyMs
+    latencyMs,
+    ...considered ? { considered } : {}
   };
 }
 async function takeOverworldTurn(params) {
   const { gb, controller, config, journal, state } = params;
   const started = Date.now();
-  const { plan, usedFallback } = config.mode === "evaluate" && !config.offline ? await planOverworldByEvaluation(config, state, journal) : await planOverworld(config, state, journal, config.vision ? screenToPng(gb.screen(), 3) : void 0);
+  const { plan, usedFallback, considered } = config.mode === "evaluate" && !config.offline ? await planOverworldByEvaluation(config, state, journal) : {
+    ...await planOverworld(
+      config,
+      state,
+      journal,
+      config.vision ? screenToPng(gb.screen(), 3) : void 0
+    ),
+    considered: void 0
+  };
   const latencyMs = Date.now() - started;
   for (const input of plan.inputs) {
     controller.press(input.button, input.repeat);
@@ -2350,7 +2380,8 @@ async function takeOverworldTurn(params) {
     detail: plan.goal,
     model: config.model,
     usedFallback,
-    latencyMs
+    latencyMs,
+    ...considered ? { considered } : {}
   };
 }
 

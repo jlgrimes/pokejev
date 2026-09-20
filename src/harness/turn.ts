@@ -4,7 +4,11 @@ import type { GameState } from '../game/state.ts';
 import { analyzeBattle, type BattleAnalysis } from '../game/battle.ts';
 import { decideBattleAction } from '../jev/battle-agent.ts';
 import { planOverworld } from '../jev/overworld-agent.ts';
-import { decideBattleByEvaluation, planOverworldByEvaluation } from '../jev/evaluate-agent.ts';
+import {
+  decideBattleByEvaluation,
+  planOverworldByEvaluation,
+  type Consideration,
+} from '../jev/evaluate-agent.ts';
 import { screenToPng } from '../emulator/png.ts';
 import type { JevConfig } from '../jev/model.ts';
 import { addNote, addRecent, type Journal } from '../jev/journal.ts';
@@ -17,6 +21,11 @@ export interface TurnOutcome {
   model: string;
   usedFallback: boolean;
   latencyMs: number;
+  /**
+   * The options Jev weighed, when it was asked as an evaluation model.
+   * Absent in generate mode, which returns prose instead of a distribution.
+   */
+  considered?: Consideration[];
 }
 
 /** Battle analysis for the current state, or null when we are not in a battle. */
@@ -86,10 +95,10 @@ async function takeBattleTurn(params: {
 }): Promise<TurnOutcome> {
   const { controller, config, journal, state, analysis } = params;
   const started = Date.now();
-  const { decision, usedFallback } =
+  const { decision, usedFallback, considered } =
     config.mode === 'evaluate' && !config.offline
       ? await decideBattleByEvaluation(config, state, analysis, journal)
-      : await decideBattleAction(config, state, analysis, journal);
+      : { ...(await decideBattleAction(config, state, analysis, journal)), considered: undefined };
   const latencyMs = Date.now() - started;
 
   let detail = '';
@@ -141,6 +150,7 @@ async function takeBattleTurn(params: {
     model: config.battleModel,
     usedFallback,
     latencyMs,
+    ...(considered ? { considered } : {}),
   };
 }
 
@@ -155,10 +165,18 @@ async function takeOverworldTurn(params: {
   const started = Date.now();
   // An evaluation model takes structured state, not pictures, so the
   // screenshot is only built for the generative path that can use it.
-  const { plan, usedFallback } =
+  const { plan, usedFallback, considered } =
     config.mode === 'evaluate' && !config.offline
       ? await planOverworldByEvaluation(config, state, journal)
-      : await planOverworld(config, state, journal, config.vision ? screenToPng(gb.screen(), 3) : undefined);
+      : {
+          ...(await planOverworld(
+            config,
+            state,
+            journal,
+            config.vision ? screenToPng(gb.screen(), 3) : undefined,
+          )),
+          considered: undefined,
+        };
   const latencyMs = Date.now() - started;
 
   for (const input of plan.inputs) {
@@ -181,5 +199,6 @@ async function takeOverworldTurn(params: {
     model: config.model,
     usedFallback,
     latencyMs,
+    ...(considered ? { considered } : {}),
   };
 }
