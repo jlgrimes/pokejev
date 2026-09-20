@@ -11,6 +11,12 @@ services:
         value: typesafe-ai/jev
       - key: JEV_BATTLE_MODEL
         value: typesafe-ai/jev
+      # Jev decides as an evaluation model: it weighs the legal options and
+      # returns a distribution, which is what the viewer draws as bars.
+      - key: JEV_MODE
+        value: evaluate
+      # Only used by JEV_MODE=generate; an evaluation model takes structured
+      # state rather than pictures.
       - key: JEV_VISION
         value: 'true'
       - key: JEV_SPEED
