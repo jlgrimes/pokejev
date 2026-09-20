@@ -2132,12 +2132,16 @@ async function takeOverworldTurn(params) {
 }
 
 // server/_lib/engine.ts
-var INITIAL_STRIDE = 2 * Math.max(1, Math.min(20, Number(process.env.JEV_SPEED ?? 4)));
+var configuredSpeed = () => Math.max(1, Math.min(20, Number(process.env.JEV_SPEED ?? 4)));
 var MAX_FRAMES = 240;
 var FrameRecorder = class {
   #frames = [];
   #counter = 0;
-  #stride = INITIAL_STRIDE;
+  #stride;
+  /** `speed` defaults to JEV_SPEED; pass it explicitly to be independent of it. */
+  constructor(speed = configuredSpeed()) {
+    this.#stride = 2 * Math.max(1, Math.min(20, Math.round(speed)));
+  }
   attach(gb) {
     gb.onFrame = (emulator) => {
       this.#counter++;

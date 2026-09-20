@@ -14,7 +14,7 @@ import type { Journal } from '../../src/jev/journal.ts';
  * through the game. JEV_SPEED multiplies it: at 10 the game plays back ten
  * times faster and spends a fraction of the time drawing it.
  */
-const INITIAL_STRIDE = 2 * Math.max(1, Math.min(20, Number(process.env.JEV_SPEED ?? 4)));
+const configuredSpeed = () => Math.max(1, Math.min(20, Number(process.env.JEV_SPEED ?? 4)));
 /** ~8 seconds of playback. Bounds the response regardless of how long a tick ran. */
 const MAX_FRAMES = 240;
 
@@ -34,7 +34,12 @@ const MAX_FRAMES = 240;
 export class FrameRecorder {
   #frames: string[] = [];
   #counter = 0;
-  #stride = INITIAL_STRIDE;
+  #stride: number;
+
+  /** `speed` defaults to JEV_SPEED; pass it explicitly to be independent of it. */
+  constructor(speed: number = configuredSpeed()) {
+    this.#stride = 2 * Math.max(1, Math.min(20, Math.round(speed)));
+  }
 
   attach(gb: GameBoy): void {
     gb.onFrame = (emulator) => {

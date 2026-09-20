@@ -106,7 +106,7 @@ describe('screen text decoding', () => {
 describe('frame recording', () => {
   test('captures a short burst at full rate', () => {
     const gb = bootTestRom();
-    const recorder = new FrameRecorder();
+    const recorder = new FrameRecorder(1); // 1x: every other frame
     recorder.attach(gb);
     gb.advance(60);
     const frames = recorder.finish(gb);
@@ -118,7 +118,7 @@ describe('frame recording', () => {
 
   test('keeps a long tick bounded without dropping its ending', () => {
     const gb = bootTestRom();
-    const recorder = new FrameRecorder();
+    const recorder = new FrameRecorder(1);
     recorder.attach(gb);
     gb.advance(3000); // far more footage than the cap allows
     const frames = recorder.finish(gb);
@@ -131,7 +131,7 @@ describe('frame recording', () => {
 
   test('always ends on the current screen', () => {
     const gb = bootTestRom();
-    const recorder = new FrameRecorder();
+    const recorder = new FrameRecorder(1);
     recorder.attach(gb);
     gb.advance(10);
     const frames = recorder.finish(gb);
